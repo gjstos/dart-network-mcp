@@ -1,0 +1,27 @@
+# Dart
+.dart_tool/
+.packages
+.pub-cache/
+.pub/
+build/
+doc/api/
+
+# IDE / OS
+.idea/
+.vscode/
+*.iml
+.DS_Store
+*.swp
+*~
+
+# Coverage / test
+coverage/
+*.lcov
+
+# Local / generated
+*.sqlite
+*.sqlite-*
+graphify-out/
+
+# Agent working state (specs/plans ficam em .docs/)
+.superpowers/

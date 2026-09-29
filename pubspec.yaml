@@ -1,0 +1,16 @@
+name: dart_vm_mcp
+description: MCP server for Dart VM HTTP profiles.
+version: 0.1.0
+publish_to: none
+environment:
+  sdk: ^3.6.0
+dependencies:
+  crypto: ^3.0.7
+  mcp_dart: ^0.6.0
+  vm_service: ^15.0.0
+  sqlite3: ^2.7.0
+  dtd: ^4.0.0
+  path: ^1.9.0
+dev_dependencies:
+  test: ^1.25.0
+  lints: ^5.0.0
