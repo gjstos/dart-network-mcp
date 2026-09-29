@@ -3,6 +3,8 @@ import 'dart:typed_data';
 
 import 'package:sqlite3/sqlite3.dart';
 
+import 'traffic_files.dart';
+
 class SessionRecord {
   SessionRecord({
     required this.vmUri,
@@ -36,17 +38,13 @@ class RequestRecord {
     required this.endTime,
     required this.statusCode,
     required this.reasonPhrase,
-    required this.requestHeaders,
-    required this.responseHeaders,
-    required this.requestBody,
-    required this.responseBody,
+    required this.headersPath,
+    required this.requestBodyPath,
+    required this.responseBodyPath,
     required this.requestBodySize,
     required this.responseBodySize,
-    required this.requestBodyTruncated,
-    required this.responseBodyTruncated,
     required this.bodyUnavailable,
     required this.error,
-    required this.rawJson,
   });
 
   final String vmUri;
@@ -58,25 +56,50 @@ class RequestRecord {
   final int? endTime;
   final int? statusCode;
   final String? reasonPhrase;
-  final Map<String, String> requestHeaders;
-  final Map<String, String> responseHeaders;
-  final Uint8List? requestBody;
-  final Uint8List? responseBody;
+  final String headersPath;
+  final String? requestBodyPath;
+  final String? responseBodyPath;
   final int requestBodySize;
   final int responseBodySize;
-  final bool requestBodyTruncated;
-  final bool responseBodyTruncated;
   final bool bodyUnavailable;
   final String? error;
-  final String rawJson;
 }
 
 class SessionStore {
-  SessionStore._(this._db);
+  SessionStore._(this._db, this.files);
 
   final Database _db;
+  final TrafficFileStore files;
 
-  static SessionStore open(String databasePath) {
+  static const _requestsTableSql = '''
+CREATE TABLE IF NOT EXISTS requests (
+  vm_uri TEXT NOT NULL,
+  request_id TEXT NOT NULL,
+  isolate_id TEXT NOT NULL,
+  method TEXT NOT NULL,
+  uri TEXT NOT NULL,
+  start_time INTEGER NOT NULL,
+  end_time INTEGER,
+  status_code INTEGER,
+  reason_phrase TEXT,
+  headers_path TEXT NOT NULL,
+  request_body_path TEXT,
+  response_body_path TEXT,
+  request_body_size INTEGER NOT NULL,
+  response_body_size INTEGER NOT NULL,
+  body_unavailable INTEGER NOT NULL,
+  error TEXT,
+  PRIMARY KEY (vm_uri, request_id, start_time),
+  FOREIGN KEY (vm_uri) REFERENCES sessions(vm_uri) ON DELETE CASCADE
+)
+''';
+
+  static SessionStore open(
+    String databasePath, {
+    required String dataDirectory,
+    TrafficFileStore? files,
+  }) {
+    final fileStore = files ?? TrafficFiles(dataDirectory);
     final db = sqlite3.open(databasePath);
     db.execute('PRAGMA journal_mode=WAL');
     db.execute('PRAGMA busy_timeout=5000');
@@ -93,34 +116,87 @@ CREATE TABLE IF NOT EXISTS sessions (
   http_profile_available INTEGER NOT NULL
 )
 ''');
-    db.execute('''
-CREATE TABLE IF NOT EXISTS requests (
-  vm_uri TEXT NOT NULL,
-  request_id TEXT NOT NULL,
-  isolate_id TEXT NOT NULL,
-  method TEXT NOT NULL,
-  uri TEXT NOT NULL,
-  start_time INTEGER NOT NULL,
-  end_time INTEGER,
-  status_code INTEGER,
-  reason_phrase TEXT,
-  request_headers TEXT NOT NULL,
-  response_headers TEXT NOT NULL,
-  request_body BLOB,
-  response_body BLOB,
-  request_body_size INTEGER NOT NULL,
-  response_body_size INTEGER NOT NULL,
-  request_body_truncated INTEGER NOT NULL,
-  response_body_truncated INTEGER NOT NULL,
-  body_unavailable INTEGER NOT NULL,
-  error TEXT,
-  raw_json TEXT NOT NULL,
-  PRIMARY KEY (vm_uri, request_id, start_time),
-  FOREIGN KEY (vm_uri) REFERENCES sessions(vm_uri) ON DELETE CASCADE
-)
-''');
-    return SessionStore._(db);
+    _migrateRequestsIfNeeded(db, fileStore);
+    db.execute(_requestsTableSql);
+    db.execute('CREATE TABLE IF NOT EXISTS retention (days INTEGER NOT NULL)');
+    final retentionCount = db.select('SELECT COUNT(*) AS c FROM retention').first['c'] as int;
+    if (retentionCount == 0) {
+      db.execute('INSERT INTO retention(days) VALUES (90)');
+    }
+    return SessionStore._(db, fileStore);
   }
+
+  static void _migrateRequestsIfNeeded(Database db, TrafficFileStore files) {
+    final columns = _tableColumns(db, 'requests');
+    if (!columns.contains('raw_json')) {
+      return;
+    }
+    db.execute('BEGIN');
+    try {
+      db.execute('DROP TABLE IF EXISTS requests_new');
+      db.execute(_requestsTableSql.replaceFirst(
+        'CREATE TABLE IF NOT EXISTS requests',
+        'CREATE TABLE requests_new',
+      ));
+      final insert = db.prepare('''
+INSERT INTO requests_new (
+  vm_uri, request_id, isolate_id, method, uri, start_time, end_time,
+  status_code, reason_phrase, headers_path, request_body_path, response_body_path,
+  request_body_size, response_body_size, body_unavailable, error
+) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+''');
+      try {
+        for (final row in db.select('SELECT * FROM requests')) {
+          final written = files.write(
+            vmUri: row['vm_uri']! as String,
+            requestId: row['request_id']! as String,
+            startTime: row['start_time']! as int,
+            requestHeaders: _decodeStringMap(row['request_headers']! as String),
+            responseHeaders: _decodeStringMap(row['response_headers']! as String),
+            requestBody: _readBlob(row['request_body']),
+            responseBody: _readBlob(row['response_body']),
+          );
+          insert.execute([
+            row['vm_uri'],
+            row['request_id'],
+            row['isolate_id'],
+            row['method'],
+            row['uri'],
+            row['start_time'],
+            row['end_time'],
+            row['status_code'],
+            row['reason_phrase'],
+            written.headersPath,
+            written.requestBodyPath,
+            written.responseBodyPath,
+            row['request_body_size'],
+            row['response_body_size'],
+            row['body_unavailable'],
+            row['error'],
+          ]);
+        }
+      } finally {
+        insert.dispose();
+      }
+      db.execute('DROP TABLE requests');
+      db.execute('ALTER TABLE requests_new RENAME TO requests');
+      db.execute('COMMIT');
+    } catch (e) {
+      try {
+        db.execute('ROLLBACK');
+      } catch (_) {}
+      rethrow;
+    }
+  }
+
+  static List<String> _tableColumns(Database db, String table) {
+    return db
+        .select('PRAGMA table_info($table)')
+        .map((row) => row['name']! as String)
+        .toList();
+  }
+
+  List<String> debugTableInfo(String table) => _tableColumns(_db, table);
 
   void close() {
     _db.dispose();
@@ -211,15 +287,37 @@ WHERE vm_uri = ?
     }
   }
 
+  int retentionDays() {
+    return _db.select('SELECT days FROM retention LIMIT 1').first['days'] as int;
+  }
+
+  void setRetentionDays(int days) {
+    _db.execute('UPDATE retention SET days = ?', [days]);
+  }
+
+  List<String> historyVmUrisPastRetention(int nowMicros) {
+    final days = retentionDays();
+    return _db
+        .select(
+          '''
+SELECT vm_uri FROM sessions
+WHERE state = 'history'
+  AND disconnected_at IS NOT NULL
+  AND ? - disconnected_at >= ? * 86400000000
+''',
+          [nowMicros, days],
+        )
+        .map((row) => row['vm_uri']! as String)
+        .toList();
+  }
+
   void upsertRequest(RequestRecord request) {
     final stmt = _db.prepare('''
 INSERT INTO requests (
   vm_uri, request_id, isolate_id, method, uri, start_time, end_time,
-  status_code, reason_phrase, request_headers, response_headers,
-  request_body, response_body, request_body_size, response_body_size,
-  request_body_truncated, response_body_truncated, body_unavailable,
-  error, raw_json
-) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+  status_code, reason_phrase, headers_path, request_body_path, response_body_path,
+  request_body_size, response_body_size, body_unavailable, error
+) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 ON CONFLICT(vm_uri, request_id, start_time) DO UPDATE SET
   isolate_id = excluded.isolate_id,
   method = excluded.method,
@@ -227,17 +325,13 @@ ON CONFLICT(vm_uri, request_id, start_time) DO UPDATE SET
   end_time = excluded.end_time,
   status_code = excluded.status_code,
   reason_phrase = excluded.reason_phrase,
-  request_headers = excluded.request_headers,
-  response_headers = excluded.response_headers,
-  request_body = excluded.request_body,
-  response_body = excluded.response_body,
+  headers_path = excluded.headers_path,
+  request_body_path = excluded.request_body_path,
+  response_body_path = excluded.response_body_path,
   request_body_size = excluded.request_body_size,
   response_body_size = excluded.response_body_size,
-  request_body_truncated = excluded.request_body_truncated,
-  response_body_truncated = excluded.response_body_truncated,
   body_unavailable = excluded.body_unavailable,
-  error = excluded.error,
-  raw_json = excluded.raw_json
+  error = excluded.error
 ''');
     try {
       stmt.execute([
@@ -250,17 +344,13 @@ ON CONFLICT(vm_uri, request_id, start_time) DO UPDATE SET
         request.endTime,
         request.statusCode,
         request.reasonPhrase,
-        jsonEncode(request.requestHeaders),
-        jsonEncode(request.responseHeaders),
-        request.requestBody,
-        request.responseBody,
+        request.headersPath,
+        request.requestBodyPath,
+        request.responseBodyPath,
         request.requestBodySize,
         request.responseBodySize,
-        request.requestBodyTruncated ? 1 : 0,
-        request.responseBodyTruncated ? 1 : 0,
         request.bodyUnavailable ? 1 : 0,
         request.error,
-        request.rawJson,
       ]);
     } finally {
       stmt.dispose();
@@ -350,17 +440,13 @@ ORDER BY start_time ASC
       endTime: row['end_time'] as int?,
       statusCode: row['status_code'] as int?,
       reasonPhrase: row['reason_phrase'] as String?,
-      requestHeaders: _decodeStringMap(row['request_headers']! as String),
-      responseHeaders: _decodeStringMap(row['response_headers']! as String),
-      requestBody: _readBlob(row['request_body']),
-      responseBody: _readBlob(row['response_body']),
+      headersPath: row['headers_path']! as String,
+      requestBodyPath: row['request_body_path'] as String?,
+      responseBodyPath: row['response_body_path'] as String?,
       requestBodySize: row['request_body_size']! as int,
       responseBodySize: row['response_body_size']! as int,
-      requestBodyTruncated: (row['request_body_truncated']! as int) == 1,
-      responseBodyTruncated: (row['response_body_truncated']! as int) == 1,
       bodyUnavailable: (row['body_unavailable']! as int) == 1,
       error: row['error'] as String?,
-      rawJson: row['raw_json']! as String,
     );
   }
 

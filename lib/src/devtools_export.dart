@@ -1,9 +1,7 @@
-import 'dart:convert';
-
-import 'session_store.dart';
+import 'har_export.dart';
 
 Map<String, Object?> buildDevToolsSnapshot(
-  List<RequestRecord> requests, {
+  List<ExportableRequest> requests, {
   required String version,
   required bool isFlutterApp,
 }) {
@@ -20,12 +18,24 @@ Map<String, Object?> buildDevToolsSnapshot(
     'network': {
       'httpRequestData': [
         for (final request in requests)
-          {'request': jsonDecode(request.rawJson)},
+          {'request': devToolsRequest(request)},
       ],
       'selectedRequestId': null,
       'socketData': <Object?>[],
       'webSocketData': <Object?>[],
       'timelineMicrosOffset': 0,
     },
+  };
+}
+
+Map<String, Object?> devToolsRequest(ExportableRequest request) {
+  return {
+    'id': request.requestId,
+    'method': request.method,
+    'uri': request.uri,
+    'startTime': request.startTime,
+    'endTime': request.endTime,
+    if (request.requestBody != null) 'requestBody': request.requestBody,
+    if (request.responseBody != null) 'responseBody': request.responseBody,
   };
 }

@@ -5,10 +5,29 @@ import 'dart:typed_data';
 import 'package:dart_network_mcp/src/dart_network_mcp.dart';
 import 'package:dart_network_mcp/src/session_store.dart';
 import 'package:dart_network_mcp/src/tool_json.dart';
+import 'package:dart_network_mcp/src/traffic_files.dart';
 import 'package:dart_network_mcp/src/vm_uri.dart';
 import 'package:test/test.dart';
 
 import 'support/fake_vm_service.dart';
+
+class ThrowingReadFiles extends TrafficFiles {
+  ThrowingReadFiles(super.dataDirectory);
+
+  int readCalls = 0;
+
+  @override
+  Uint8List? readBytes(String path) {
+    readCalls++;
+    throw StateError('readBytes should not be called');
+  }
+
+  @override
+  HeaderMaps readHeaders(String path) {
+    readCalls++;
+    throw StateError('readHeaders should not be called');
+  }
+}
 
 void main() {
   late Directory tempDir;
@@ -19,7 +38,7 @@ void main() {
   setUp(() async {
     tempDir = Directory.systemTemp.createTempSync('dart-network-mcp-tool');
     dataDir = tempDir.path;
-    store = SessionStore.open('$dataDir/network.sqlite');
+    store = SessionStore.open('$dataDir/network.sqlite', dataDirectory: dataDir);
     mcp = DartNetworkMcp(store: store, dataDirectory: dataDir);
   });
 
@@ -52,6 +71,193 @@ void main() {
   }
 
   group('DartNetworkMcp', () {
+    SessionRecord liveSession(String vmUri) => SessionRecord(
+          vmUri: vmUri,
+          state: 'live',
+          appName: 'app',
+          isolateIds: ['isolates/1'],
+          startedAt: 1,
+          disconnectedAt: null,
+          disconnectReason: null,
+          httpProfileAvailable: true,
+        );
+
+    test('listRequests returns sizes and does not read body files', () {
+      const vmUri = 'ws://127.0.0.1:8181/ws';
+      final dbPath = '${tempDir.path}/throwing.sqlite';
+      final files = ThrowingReadFiles(tempDir.path);
+      final store = SessionStore.open(
+        dbPath,
+        dataDirectory: tempDir.path,
+        files: files,
+      );
+      final mcp = DartNetworkMcp(store: store, dataDirectory: tempDir.path);
+      addTearDown(() {
+        store.close();
+      });
+      store.upsertSession(liveSession(vmUri));
+      final written = TrafficFiles(tempDir.path).write(
+        vmUri: vmUri,
+        requestId: '1',
+        startTime: 10,
+        requestHeaders: {'cookie': 'huge'},
+        responseHeaders: {},
+        requestBody: null,
+        responseBody: Uint8List.fromList(List.filled(50, 1)),
+      );
+      store.upsertRequest(
+        RequestRecord(
+          vmUri: vmUri,
+          requestId: '1',
+          isolateId: 'isolates/1',
+          method: 'GET',
+          uri: 'https://example.com/1',
+          startTime: 10,
+          endTime: 5010,
+          statusCode: 200,
+          reasonPhrase: 'OK',
+          headersPath: written.headersPath,
+          requestBodyPath: written.requestBodyPath,
+          responseBodyPath: written.responseBodyPath,
+          requestBodySize: written.requestBodySize,
+          responseBodySize: written.responseBodySize,
+          bodyUnavailable: false,
+          error: null,
+        ),
+      );
+
+      final page = mcp.listRequests(vmUri);
+      final item = (page['requests'] as List).single as Map;
+      expect(item['responseBodySize'], 50);
+      expect(item['requestBodySize'], 0);
+      expect(item['bodyUnavailable'], isFalse);
+      expect(item['durationMs'], 5);
+      expect(item.containsKey('responseBody'), isFalse);
+      expect(item.containsKey('requestHeaders'), isFalse);
+      expect(item.containsKey('responseBodyPath'), isFalse);
+      expect(files.readCalls, 0);
+    });
+
+    test('getRequest inlines a small json body', () {
+      const vmUri = 'ws://127.0.0.1:8181/ws';
+      store.upsertSession(liveSession(vmUri));
+      final written = store.files.write(
+        vmUri: vmUri,
+        requestId: '1',
+        startTime: 10,
+        requestHeaders: {'accept': 'application/json'},
+        responseHeaders: {},
+        requestBody: null,
+        responseBody: Uint8List.fromList(utf8.encode('{"id":1}')),
+      );
+      store.upsertRequest(
+        RequestRecord(
+          vmUri: vmUri,
+          requestId: '1',
+          isolateId: 'isolates/1',
+          method: 'GET',
+          uri: 'https://example.com/1',
+          startTime: 10,
+          endTime: 20,
+          statusCode: 200,
+          reasonPhrase: 'OK',
+          headersPath: written.headersPath,
+          requestBodyPath: written.requestBodyPath,
+          responseBodyPath: written.responseBodyPath,
+          requestBodySize: written.requestBodySize,
+          responseBodySize: written.responseBodySize,
+          bodyUnavailable: false,
+          error: null,
+        ),
+      );
+
+      final detail = mcp.getRequest(vmUri, '1')['request'] as Map;
+      expect(detail['responseBody'], {'id': 1});
+      expect(detail['responseBodyEncoding'], 'json');
+      expect(detail.containsKey('responseBodyPath'), isFalse);
+      expect(detail['requestHeaders'], {'accept': 'application/json'});
+    });
+
+    test('getRequest replaces oversized response body with path and size', () {
+      const vmUri = 'ws://127.0.0.1:8181/ws';
+      store.upsertSession(liveSession(vmUri));
+      final body = Uint8List.fromList(List.filled(120000, 0x61));
+      final written = store.files.write(
+        vmUri: vmUri,
+        requestId: '1',
+        startTime: 10,
+        requestHeaders: {'accept': 'application/json'},
+        responseHeaders: {},
+        requestBody: null,
+        responseBody: body,
+      );
+      store.upsertRequest(
+        RequestRecord(
+          vmUri: vmUri,
+          requestId: '1',
+          isolateId: 'isolates/1',
+          method: 'GET',
+          uri: 'https://example.com/1',
+          startTime: 10,
+          endTime: 20,
+          statusCode: 200,
+          reasonPhrase: 'OK',
+          headersPath: written.headersPath,
+          requestBodyPath: written.requestBodyPath,
+          responseBodyPath: written.responseBodyPath,
+          requestBodySize: written.requestBodySize,
+          responseBodySize: written.responseBodySize,
+          bodyUnavailable: false,
+          error: null,
+        ),
+      );
+
+      final detail = mcp.getRequest(vmUri, '1')['request'] as Map;
+      expect(detail.containsKey('responseBody'), isFalse);
+      expect(detail['responseBodyPath'], isNotEmpty);
+      expect(detail['responseBodySize'], 120000);
+      expect(detail.containsKey('requestHeaders'), isTrue);
+    });
+
+    test('getRequest ambiguous request does not read files', () {
+      const vmUri = 'ws://127.0.0.1:8181/ws';
+      final files = ThrowingReadFiles(tempDir.path);
+      final store = SessionStore.open(
+        '${tempDir.path}/ambiguous.sqlite',
+        dataDirectory: tempDir.path,
+        files: files,
+      );
+      final mcp = DartNetworkMcp(store: store, dataDirectory: tempDir.path);
+      addTearDown(store.close);
+      store.upsertSession(liveSession(vmUri));
+      for (final startTime in [10, 20]) {
+        store.upsertRequest(
+          RequestRecord(
+            vmUri: vmUri,
+            requestId: 'same',
+            isolateId: 'isolates/1',
+            method: 'GET',
+            uri: 'https://example.com/same',
+            startTime: startTime,
+            endTime: startTime + 1,
+            statusCode: 200,
+            reasonPhrase: 'OK',
+            headersPath: 'unused.headers.json',
+            requestBodyPath: null,
+            responseBodyPath: null,
+            requestBodySize: 0,
+            responseBodySize: 0,
+            bodyUnavailable: false,
+            error: null,
+          ),
+        );
+      }
+
+      final result = mcp.getRequest(vmUri, 'same');
+      expect((result['error'] as Map)['code'], 'ambiguous_request');
+      expect(files.readCalls, 0);
+    });
+
     test('listRequests includes response body text', () async {
       final fake = await FakeVmService.start();
       fake.addRequest(
@@ -66,9 +272,9 @@ void main() {
       final requests = result['requests'] as List<dynamic>;
       final item = requests.single as Map;
       expect(item['method'], 'GET');
-      expect(item['responseBody'], {'uuid': 'abc'});
-      expect(item['responseBodyEncoding'], 'json');
+      expect(item['responseBodySize'], '{"uuid":"abc"}'.length);
       expect(item['durationMs'], 0);
+      expect(item.containsKey('responseBody'), isFalse);
       expect(item.containsKey('requestBody'), isFalse);
       expect(item.containsKey('requestHeaders'), isFalse);
       expect(item.containsKey('isolateId'), isFalse);
@@ -151,30 +357,21 @@ void main() {
 
       final objectItem = byId['json-object'] as Map;
       expect(objectItem['durationMs'], 1500);
-      expect(objectItem['requestBody'], {'title': 'a'});
-      expect(objectItem['requestBodyEncoding'], 'json');
-      expect(objectItem['responseBody'], {'id': 1, 'title': 'a'});
-      expect(objectItem['responseBodyEncoding'], 'json');
+      expect(objectItem['requestBodySize'], '{"title":"a"}'.length);
+      expect(objectItem['responseBodySize'], '{"id":1,"title":"a"}'.length);
+      expect(objectItem.containsKey('requestBody'), isFalse);
+      expect(objectItem.containsKey('responseBody'), isFalse);
       expect(objectItem.containsKey('requestHeaders'), isFalse);
       expect(objectItem.containsKey('responseHeaders'), isFalse);
       expect(objectItem.containsKey('isolateId'), isFalse);
       expect(objectItem.containsKey('reasonPhrase'), isFalse);
       expect(objectItem.containsKey('endTime'), isFalse);
-      expect(objectItem.containsKey('requestBodySize'), isFalse);
+      expect(objectItem.containsKey('responseBodyPath'), isFalse);
 
-      expect(byId['json-array']!['responseBody'], [
-        {'id': 1},
-      ]);
-      expect(byId['json-array']!['responseBodyEncoding'], 'json');
-      expect(byId['plain-text']!['responseBody'], 'not json');
-      expect(byId['plain-text']!['responseBodyEncoding'], 'utf8');
-      expect(byId['broken-json']!['responseBody'], '{"a":');
-      expect(byId['broken-json']!['responseBodyEncoding'], 'utf8');
-      expect(byId['binary']!['responseBodyEncoding'], 'base64');
-      expect(
-        byId['binary']!['responseBody'],
-        base64Encode(const [0xFF, 0xFE]),
-      );
+      expect(byId['json-array']!['responseBodySize'], '[{"id":1}]'.length);
+      expect(byId['plain-text']!['responseBodySize'], 'not json'.length);
+      expect(byId['broken-json']!['responseBodySize'], '{"a":'.length);
+      expect(byId['binary']!['responseBodySize'], 2);
 
       final detail =
           mcp.getRequest(key, 'json-object', startTime: start)['request']
@@ -202,12 +399,12 @@ void main() {
             (entry['request'] as Map)['method'] == 'POST',
       );
       final postData = (objectEntry['request'] as Map)['postData'] as Map;
-      final content =
-          ((objectEntry['response'] as Map)['content'] as Map);
       expect(postData['text'], '{"title":"a"}');
       expect(postData.containsKey('encoding'), isFalse);
+      final content =
+          ((objectEntry['response'] as Map)['content'] as Map);
       expect(content['text'], '{"id":1,"title":"a"}');
-      expect(content['text'], isA<String>());
+      expect(content['size'], '{"id":1,"title":"a"}'.length);
       expect(content.containsKey('encoding'), isFalse);
       await fake.close();
     });
@@ -221,11 +418,8 @@ void main() {
       final key = await attachFake(fake);
       final item =
           (mcp.listRequests(key)['requests'] as List).single as Map;
-      expect(item['responseBodyTruncated'], isTrue);
-      expect(item['responseBodySize'], 1000001);
-      expect(item['responseBodyEncoding'], 'utf8');
-      expect(item['responseBody'], isA<String>());
-      expect((item['responseBody'] as String).length, 1000000);
+      expect(item.containsKey('responseBody'), isFalse);
+      expect(item.containsKey('responseBodyEncoding'), isFalse);
       expect(item.containsKey('isolateId'), isFalse);
       await fake.close();
     });
@@ -320,7 +514,57 @@ void main() {
       await fake.close();
     });
 
-    test('deleteSession keeps export har on disk', () async {
+    test('deleteSession removes rows, body directory and matching exports',
+        () async {
+      const vmUri = 'ws://127.0.0.1:8181/ws';
+      store.upsertSession(liveSession(vmUri));
+      final files = TrafficFiles(tempDir.path);
+      final written = files.write(
+        vmUri: vmUri,
+        requestId: '1',
+        startTime: 10,
+        requestHeaders: {},
+        responseHeaders: {},
+        requestBody: Uint8List.fromList([1]),
+        responseBody: null,
+      );
+      Directory('${tempDir.path}/exports').createSync();
+      final hash8 = files.exportHash8(vmUri);
+      File('${tempDir.path}/exports/dart_network_mcp_20260101T000000_$hash8.json')
+          .writeAsStringSync('{}');
+      store.upsertRequest(
+        RequestRecord(
+          vmUri: vmUri,
+          requestId: '1',
+          isolateId: 'isolates/1',
+          method: 'GET',
+          uri: 'https://example.com/1',
+          startTime: 10,
+          endTime: 20,
+          statusCode: 200,
+          reasonPhrase: 'OK',
+          headersPath: written.headersPath,
+          requestBodyPath: written.requestBodyPath,
+          responseBodyPath: written.responseBodyPath,
+          requestBodySize: written.requestBodySize,
+          responseBodySize: written.responseBodySize,
+          bodyUnavailable: false,
+          error: null,
+        ),
+      );
+
+      final result = await mcp.deleteSession(vmUri);
+      expect(result['deleted'], isTrue);
+      expect(store.getSession(vmUri), isNull);
+      expect(File(written.requestBodyPath!).existsSync(), isFalse);
+      expect(
+        File('${tempDir.path}/exports/dart_network_mcp_20260101T000000_$hash8.json')
+            .existsSync(),
+        isFalse,
+      );
+    });
+
+    test('deleteSession removes export har from disk', () async {
       final fake = await FakeVmService.start();
       fake.addRequest(sampleRequest(id: 'export-me', startTime: 700));
       final key = await attachFake(fake);
@@ -333,7 +577,7 @@ void main() {
       expect(deleted['error'], isNull);
       expect(deleted['vmUri'], key);
       expect(deleted['state'], 'live');
-      expect(File(path).existsSync(), isTrue);
+      expect(File(path).existsSync(), isFalse);
       expect(store.getSession(key), isNull);
       await fake.close();
     });
@@ -371,6 +615,15 @@ void main() {
         ),
       );
       for (var i = 0; i < 201; i++) {
+        final written = store.files.write(
+          vmUri: key,
+          requestId: 'bulk-$i',
+          startTime: 1000 + i,
+          requestHeaders: const {},
+          responseHeaders: const {},
+          requestBody: null,
+          responseBody: Uint8List.fromList(const [1]),
+        );
         store.upsertRequest(
           RequestRecord(
             vmUri: key,
@@ -382,17 +635,13 @@ void main() {
             endTime: 1100 + i,
             statusCode: 200,
             reasonPhrase: 'OK',
-            requestHeaders: const {},
-            responseHeaders: const {},
-            requestBody: null,
-            responseBody: Uint8List.fromList(const [1]),
-            requestBodySize: 0,
-            responseBodySize: 1,
-            requestBodyTruncated: false,
-            responseBodyTruncated: false,
+            headersPath: written.headersPath,
+            requestBodyPath: written.requestBodyPath,
+            responseBodyPath: written.responseBodyPath,
+            requestBodySize: written.requestBodySize,
+            responseBodySize: written.responseBodySize,
             bodyUnavailable: false,
             error: null,
-            rawJson: '{"id":"bulk-$i"}',
           ),
         );
       }

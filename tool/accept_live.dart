@@ -14,7 +14,7 @@ Future<void> main(List<String> args) async {
   final vmUri = args.first;
   final dataDir = Directory.systemTemp.createTempSync('dart_network_mcp_accept_').path;
   stdout.writeln('DATA_DIR=$dataDir');
-  final store = SessionStore.open('$dataDir/network.sqlite');
+  final store = SessionStore.open('$dataDir/network.sqlite', dataDirectory: dataDir);
   final mcp = DartNetworkMcp(store: store, dataDirectory: dataDir);
 
   Future<void> dump(String label, Map<String, Object?> map) async {

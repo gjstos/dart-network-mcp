@@ -483,6 +483,29 @@ void _registerTools(McpServer server, DartNetworkMcp mcp, {required bool inDocke
       return _toolResult(await mcp.deleteSession(vmUri));
     },
   );
+
+  server.tool(
+    'get_retention',
+    description: 'Return the session retention period in days',
+    toolInputSchema: ToolInputSchema(properties: {}),
+    callback: ({args, extra}) async => _toolResult(mcp.getRetention()),
+  );
+
+  server.tool(
+    'set_retention',
+    description: 'Set the session retention period in days and sweep expired history',
+    toolInputSchema: ToolInputSchema(
+      properties: {'days': {'type': 'integer'}},
+      required: ['days'],
+    ),
+    callback: ({args, extra}) async {
+      final days = args?['days'];
+      if (days is! int) {
+        return _toolResult(toolError('invalid_params', 'days must be an integer'));
+      }
+      return _toolResult(mcp.setRetention(days));
+    },
+  );
 }
 
 Future<void> main() async {
@@ -492,10 +515,22 @@ Future<void> main() async {
   await _ensureDataDirectory(dataDir);
 
   final dbPath = p.join(dataDir, 'network.sqlite');
-  final store = SessionStore.open(dbPath);
+  final store = SessionStore.open(dbPath, dataDirectory: dataDir);
   _chmodIfUnix(dbPath, '600');
 
   final mcp = DartNetworkMcp(store: store, dataDirectory: dataDir);
+  try {
+    mcp.sweepRetention();
+  } catch (e) {
+    _log('startup sweepRetention error (ignored): $e');
+  }
+  Timer.periodic(const Duration(hours: 1), (_) {
+    try {
+      mcp.sweepRetention();
+    } catch (e) {
+      _log('hourly sweepRetention error (ignored): $e');
+    }
+  });
   await _recoverLiveSessions(mcp: mcp, store: store, inDocker: inDocker);
 
   final server = McpServer(

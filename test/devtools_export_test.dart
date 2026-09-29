@@ -1,16 +1,14 @@
-import 'dart:convert';
 import 'dart:typed_data';
 
 import 'package:dart_network_mcp/src/devtools_export.dart';
-import 'package:dart_network_mcp/src/session_store.dart';
+import 'package:dart_network_mcp/src/har_export.dart';
 import 'package:test/test.dart';
 
 void main() {
   const version = '0.1.0';
-  const rawJson = '{"id":"req-1","method":"GET"}';
 
-  RequestRecord sampleRequest({required String rawJson}) {
-    return RequestRecord(
+  ExportableRequest sampleRequest() {
+    return ExportableRequest(
       vmUri: 'ws://vm',
       requestId: 'req-1',
       isolateId: 'isolates/1',
@@ -20,24 +18,53 @@ void main() {
       endTime: 1710000000500000,
       statusCode: 200,
       reasonPhrase: 'OK',
-      requestHeaders: {},
-      responseHeaders: {},
+      requestHeaders: const {},
+      responseHeaders: const {},
       requestBody: null,
-      responseBody: Uint8List(0),
+      responseBody: null,
       requestBodySize: 0,
       responseBodySize: 0,
-      requestBodyTruncated: false,
-      responseBodyTruncated: false,
       bodyUnavailable: false,
       error: null,
-      rawJson: rawJson,
     );
   }
 
+  test('devtools request contains the full body loaded for that request only', () {
+    final request = devToolsRequest(
+      ExportableRequest(
+        vmUri: 'ws://vm',
+        requestId: '1',
+        isolateId: 'isolates/1',
+        method: 'POST',
+        uri: 'https://example/order',
+        startTime: 1,
+        endTime: 2000,
+        statusCode: 200,
+        reasonPhrase: 'OK',
+        requestHeaders: {},
+        responseHeaders: {'content-type': 'application/json'},
+        requestBody: null,
+        responseBody: Uint8List.fromList('{"ok":true}'.codeUnits),
+        requestBodySize: 0,
+        responseBodySize: 11,
+        bodyUnavailable: false,
+        error: null,
+      ),
+    );
+    expect(request['id'], '1');
+    expect(request['method'], 'POST');
+    expect(request['uri'], 'https://example/order');
+    expect(request['startTime'], 1);
+    expect(request['endTime'], 2000);
+    expect(request['responseBody'], '{"ok":true}'.codeUnits);
+    expect(request.containsKey('rawJson'), isFalse);
+  });
+
   group('buildDevToolsSnapshot', () {
     test('maps requests to offline DevTools network snapshot', () {
+      final sample = sampleRequest();
       final snapshot = buildDevToolsSnapshot(
-        [sampleRequest(rawJson: rawJson)],
+        [sample],
         version: version,
         isFlutterApp: true,
       );
@@ -71,7 +98,7 @@ void main() {
       final httpRequestData = network['httpRequestData'] as List<Object?>;
       expect(httpRequestData.length, 1);
       final first = httpRequestData.first as Map<String, Object?>;
-      expect(first['request'], jsonDecode(rawJson));
+      expect(first['request'], devToolsRequest(sample));
     });
 
     test('connectedApp.isFlutterApp reflects argument', () {

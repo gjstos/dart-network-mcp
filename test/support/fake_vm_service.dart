@@ -55,6 +55,7 @@ class FakeVmService {
   late int _profileTimestamp;
   bool failNextGetHttpProfileRequest = false;
   bool hangNextGetHttpProfile = false;
+  int clearHttpProfileCalls = 0;
 
   late final String consoleHttpUri;
   late final Uri webSocketUri;
@@ -203,11 +204,13 @@ class FakeVmService {
       final result = _dispatch(method, params);
       socket.add(jsonEncode({'jsonrpc': '2.0', 'id': id, 'result': result}));
     } catch (e) {
-      socket.add(jsonEncode({
-        'jsonrpc': '2.0',
-        'id': id,
-        'error': {'code': -32000, 'message': e.toString()},
-      }));
+      try {
+        socket.add(jsonEncode({
+          'jsonrpc': '2.0',
+          'id': id,
+          'error': {'code': -32000, 'message': e.toString()},
+        }));
+      } catch (_) {}
     }
   }
 
@@ -238,6 +241,9 @@ class FakeVmService {
         return _getHttpProfile(params);
       case 'ext.dart.io.getHttpProfileRequest':
         return _getHttpProfileRequest(params);
+      case 'ext.dart.io.clearHttpProfile':
+        clearHttpProfileCalls++;
+        return {'type': 'Success'};
       default:
         return {'type': 'Success'};
     }

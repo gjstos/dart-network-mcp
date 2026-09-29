@@ -2,6 +2,8 @@ import 'dart:io';
 import 'dart:typed_data';
 
 import 'package:dart_network_mcp/src/session_store.dart';
+import 'package:dart_network_mcp/src/traffic_files.dart';
+import 'package:sqlite3/sqlite3.dart';
 import 'package:test/test.dart';
 
 void main() {
@@ -17,7 +19,8 @@ void main() {
     tempDir.deleteSync(recursive: true);
   });
 
-  SessionStore openFresh() => SessionStore.open(dbPath);
+  SessionStore openFresh() =>
+      SessionStore.open(dbPath, dataDirectory: tempDir.path);
 
   SessionRecord liveSession(String vmUri) => SessionRecord(
         vmUri: vmUri,
@@ -35,29 +38,38 @@ void main() {
     required String requestId,
     required int startTime,
     int? statusCode,
-  }) =>
-      RequestRecord(
-        vmUri: vmUri,
-        requestId: requestId,
-        isolateId: 'isolates/1',
-        method: 'GET',
-        uri: 'https://example.com/path',
-        startTime: startTime,
-        endTime: startTime + 100,
-        statusCode: statusCode ?? 200,
-        reasonPhrase: 'OK',
-        requestHeaders: {'accept': 'application/json'},
-        responseHeaders: {'content-type': 'application/json'},
-        requestBody: Uint8List.fromList([1, 2, 3]),
-        responseBody: Uint8List.fromList([4, 5, 6]),
-        requestBodySize: 3,
-        responseBodySize: 3,
-        requestBodyTruncated: false,
-        responseBodyTruncated: false,
-        bodyUnavailable: false,
-        error: null,
-        rawJson: '{"id":"$requestId"}',
-      );
+    WrittenTraffic? written,
+    bool bodyUnavailable = false,
+  }) {
+    final traffic = written ??
+        TrafficFiles(tempDir.path).write(
+          vmUri: vmUri,
+          requestId: requestId,
+          startTime: startTime,
+          requestHeaders: {'accept': 'application/json'},
+          responseHeaders: {'content-type': 'application/json'},
+          requestBody: Uint8List.fromList([1, 2, 3]),
+          responseBody: Uint8List.fromList([4, 5, 6]),
+        );
+    return RequestRecord(
+      vmUri: vmUri,
+      requestId: requestId,
+      isolateId: 'isolates/1',
+      method: 'GET',
+      uri: 'https://example.com/path',
+      startTime: startTime,
+      endTime: startTime + 100,
+      statusCode: statusCode ?? 200,
+      reasonPhrase: 'OK',
+      headersPath: traffic.headersPath,
+      requestBodyPath: traffic.requestBodyPath,
+      responseBodyPath: traffic.responseBodyPath,
+      requestBodySize: traffic.requestBodySize,
+      responseBodySize: traffic.responseBodySize,
+      bodyUnavailable: bodyUnavailable,
+      error: null,
+    );
+  }
 
   group('persistence via WAL', () {
     test('two vmUri do not return each other requests in listRequests', () {
@@ -198,6 +210,72 @@ void main() {
       expect(live.length, 1);
       expect(live.single.vmUri, 'ws://a');
       reopened.close();
+    });
+
+    test('stores paths and rewrites the same primary key', () {
+      final store = SessionStore.open(dbPath, dataDirectory: tempDir.path);
+      store.upsertSession(liveSession('ws://a/ws'));
+      final files = store.files;
+      final written = files.write(
+        vmUri: 'ws://a/ws',
+        requestId: '1',
+        startTime: 10,
+        requestHeaders: {'a': '1'},
+        responseHeaders: {},
+        requestBody: Uint8List.fromList([1, 2, 3, 4]),
+        responseBody: null,
+      );
+      store.upsertRequest(
+        request(
+          vmUri: 'ws://a/ws',
+          requestId: '1',
+          startTime: 10,
+          written: written,
+          bodyUnavailable: false,
+        ),
+      );
+      store.close();
+
+      final reopened = SessionStore.open(dbPath, dataDirectory: tempDir.path);
+      final row = reopened.listRequests(vmUri: 'ws://a/ws').single;
+      expect(row.requestBodyPath, written.requestBodyPath);
+      expect(row.responseBodyPath, isNull);
+      expect(row.requestBodySize, 4);
+      expect(row.headersPath, written.headersPath);
+      reopened.close();
+    });
+
+    test('migrates inline blobs into files and drops raw_json', () {
+      final db = sqlite3.open(dbPath);
+      db.execute('CREATE TABLE sessions (vm_uri TEXT PRIMARY KEY, state TEXT, app_name TEXT, isolate_ids TEXT, started_at INTEGER, disconnected_at INTEGER, disconnect_reason TEXT, http_profile_available INTEGER)');
+      db.execute('''CREATE TABLE requests (
+    vm_uri TEXT, request_id TEXT, isolate_id TEXT, method TEXT, uri TEXT,
+    start_time INTEGER, end_time INTEGER, status_code INTEGER, reason_phrase TEXT,
+    request_headers TEXT, response_headers TEXT, request_body BLOB, response_body BLOB,
+    request_body_size INTEGER, response_body_size INTEGER,
+    request_body_truncated INTEGER, response_body_truncated INTEGER,
+    body_unavailable INTEGER, error TEXT, raw_json TEXT,
+    PRIMARY KEY (vm_uri, request_id, start_time))''');
+      db.execute(
+        "INSERT INTO sessions VALUES ('ws://old/ws','history','app','[]',1,2,NULL,1)",
+      );
+      db.execute(
+        "INSERT INTO requests VALUES ('ws://old/ws','1','isolates/1','GET','https://example/',10,20,200,'OK','{\"a\":\"b\"}','{}',X'0102',NULL,2,0,1,0,0,NULL,'{\"id\":\"1\"}')",
+      );
+      db.dispose();
+
+      final store = SessionStore.open(dbPath, dataDirectory: tempDir.path);
+      final row = store.listRequests(vmUri: 'ws://old/ws').single;
+      expect(row.requestBodyPath, isNotNull);
+      expect(File(row.requestBodyPath!).readAsBytesSync(), [1, 2]);
+      expect(row.responseBodyPath, isNull);
+      expect(row.requestBodySize, 2);
+      final headers = store.files.readHeaders(row.headersPath);
+      expect(headers.requestHeaders['a'], 'b');
+      final info = store.debugTableInfo('requests');
+      expect(info.contains('raw_json'), isFalse);
+      expect(info.contains('request_body'), isFalse);
+      store.close();
     });
   });
 }

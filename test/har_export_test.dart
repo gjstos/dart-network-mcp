@@ -2,13 +2,39 @@ import 'dart:convert';
 import 'dart:typed_data';
 
 import 'package:dart_network_mcp/src/har_export.dart';
-import 'package:dart_network_mcp/src/session_store.dart';
 import 'package:test/test.dart';
 
 void main() {
   const harVersion = '0.1.0-test';
 
-  RequestRecord sampleGetRequest({
+  test('har entry contains the full body loaded for that request only', () {
+    final entry = harEntry(
+      ExportableRequest(
+        vmUri: 'ws://vm',
+        requestId: '1',
+        isolateId: 'isolates/1',
+        method: 'POST',
+        uri: 'https://example/order',
+        startTime: 1,
+        endTime: 2000,
+        statusCode: 200,
+        reasonPhrase: 'OK',
+        requestHeaders: {},
+        responseHeaders: {'content-type': 'application/json'},
+        requestBody: null,
+        responseBody: Uint8List.fromList('{"ok":true}'.codeUnits),
+        requestBodySize: 0,
+        responseBodySize: 11,
+        bodyUnavailable: false,
+        error: null,
+      ),
+    );
+    final response = entry['response'] as Map;
+    final content = response['content'] as Map;
+    expect(content['text'], '{"ok":true}');
+  });
+
+  ExportableRequest sampleGetRequest({
     int? endTime = 1710000000500000,
     Uint8List? responseBody,
     int? responseBodySize,
@@ -16,7 +42,7 @@ void main() {
     int? requestBodySize,
   }) {
     final body = responseBody ?? Uint8List.fromList(utf8.encode('{"ok":true}'));
-    return RequestRecord(
+    return ExportableRequest(
       vmUri: 'ws://vm',
       requestId: 'req-1',
       isolateId: 'isolates/1',
@@ -26,17 +52,14 @@ void main() {
       endTime: endTime,
       statusCode: 200,
       reasonPhrase: 'OK',
-      requestHeaders: {'accept': 'application/json'},
-      responseHeaders: {'content-type': 'application/json'},
+      requestHeaders: const {},
+      responseHeaders: const {},
       requestBody: requestBody,
       responseBody: body,
       requestBodySize: requestBodySize ?? requestBody?.length ?? 0,
       responseBodySize: responseBodySize ?? body.length,
-      requestBodyTruncated: false,
-      responseBodyTruncated: false,
       bodyUnavailable: false,
       error: null,
-      rawJson: '{}',
     );
   }
 
@@ -67,6 +90,7 @@ void main() {
       final response = entry['response'] as Map<String, Object?>;
       final content = response['content'] as Map<String, Object?>;
       expect(content['text'], '{"ok":true}');
+      expect(content['size'], '{"ok":true}'.length);
       expect(content.containsKey('encoding'), isFalse);
 
       final timings = entry['timings'] as Map<String, Object?>;
@@ -102,6 +126,7 @@ void main() {
           ((entries.single as Map)['response'] as Map)['content'] as Map;
       expect(content['encoding'], 'base64');
       expect(content['text'], base64Encode(body));
+      expect(content['size'], 2);
     });
 
     test('null endTime yields entry time 0', () {
@@ -130,6 +155,7 @@ void main() {
           ((entries.single as Map)['response'] as Map)['content'] as Map;
       expect(content['encoding'], 'base64');
       expect(content['text'], base64Encode(body));
+      expect(content['size'], 2);
     });
 
     test('UTF-8 request body maps to postData text without encoding', () {

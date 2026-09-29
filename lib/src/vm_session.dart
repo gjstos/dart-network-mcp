@@ -1,14 +1,10 @@
 import 'dart:async';
-import 'dart:convert';
-import 'dart:typed_data';
 
 import 'package:vm_service/vm_service.dart';
 import 'package:vm_service/vm_service_io.dart';
 
 import 'session_store.dart';
 import 'vm_uri.dart';
-
-const int _maxBodyBytes = 1000000;
 
 String? _packageNameFromRootLib(String? uri) {
   if (uri == null || !uri.startsWith('package:')) {
@@ -72,6 +68,7 @@ class VmSession {
   final Set<String> _loggingEnabledIsolateIds;
   Timer? _pollTimer;
   final Map<String, DateTime> _lastProfileTimestampByIsolate = {};
+  final Map<String, Set<String>> _inFlightByIsolate = {};
   bool _disposed = false;
   StreamSubscription<Event>? _isolateEventSub;
 
@@ -242,10 +239,28 @@ class VmSession {
             profile.timestamp.isBefore(lastTimestamp)) {
           profile = await _rpc(() => _service.getHttpProfile(isolateId));
         }
-        _lastProfileTimestampByIsolate[isolateId] = profile.timestamp;
+        final inFlight = _inFlightByIsolate[isolateId] ??= {};
+        var anyPersistFailed = false;
         for (final ref in profile.requests) {
+          if (ref.endTime == null) {
+            inFlight.add(ref.id);
+          } else {
+            inFlight.remove(ref.id);
+          }
           try {
             await _persistRequest(isolateId, ref);
+          } catch (_) {
+            anyPersistFailed = true;
+          }
+        }
+        if (!anyPersistFailed) {
+          _lastProfileTimestampByIsolate[isolateId] = profile.timestamp;
+        }
+        if (!anyPersistFailed && inFlight.isEmpty) {
+          try {
+            await _rpc(() => _service.clearHttpProfile(isolateId));
+          } on TimeoutException {
+            rethrow;
           } catch (_) {}
         }
       }
@@ -277,21 +292,18 @@ class VmSession {
 
     var requestBody = full?.requestBody;
     var responseBody = full?.responseBody;
-    var requestBodySize = requestBody?.length ?? 0;
-    var responseBodySize = responseBody?.length ?? 0;
-    var requestBodyTruncated = false;
-    var responseBodyTruncated = false;
+    final requestBodySize = requestBody?.length ?? 0;
+    final responseBodySize = responseBody?.length ?? 0;
 
-    if (requestBody != null && requestBody.length > _maxBodyBytes) {
-      requestBodySize = requestBody.length;
-      requestBody = Uint8List.fromList(requestBody.sublist(0, _maxBodyBytes));
-      requestBodyTruncated = true;
-    }
-    if (responseBody != null && responseBody.length > _maxBodyBytes) {
-      responseBodySize = responseBody.length;
-      responseBody = Uint8List.fromList(responseBody.sublist(0, _maxBodyBytes));
-      responseBodyTruncated = true;
-    }
+    final written = store.files.write(
+      vmUri: vmUri,
+      requestId: ref.id,
+      startTime: ref.startTime.microsecondsSinceEpoch,
+      requestHeaders: requestHeaders,
+      responseHeaders: responseHeaders,
+      requestBody: requestBody,
+      responseBody: responseBody,
+    );
 
     store.upsertRequest(
       RequestRecord(
@@ -304,17 +316,13 @@ class VmSession {
         endTime: ref.endTime?.microsecondsSinceEpoch,
         statusCode: responseData?.statusCode,
         reasonPhrase: responseData?.reasonPhrase,
-        requestHeaders: requestHeaders,
-        responseHeaders: responseHeaders,
-        requestBody: requestBody,
-        responseBody: responseBody,
+        headersPath: written.headersPath,
+        requestBodyPath: written.requestBodyPath,
+        responseBodyPath: written.responseBodyPath,
         requestBodySize: requestBodySize,
         responseBodySize: responseBodySize,
-        requestBodyTruncated: requestBodyTruncated,
-        responseBodyTruncated: responseBodyTruncated,
         bodyUnavailable: bodyUnavailable,
         error: responseData?.error ?? requestData?.error,
-        rawJson: jsonEncode(_requestToJson(ref, full)),
       ),
     );
   }
@@ -324,22 +332,6 @@ class VmSession {
       return {};
     }
     return headers.map((key, value) => MapEntry(key, value.toString()));
-  }
-
-  Map<String, dynamic> _requestToJson(
-    HttpProfileRequestRef ref,
-    HttpProfileRequest? full,
-  ) {
-    return {
-      'id': ref.id,
-      'method': ref.method,
-      'uri': ref.uri.toString(),
-      'startTime': ref.startTime.microsecondsSinceEpoch,
-      if (ref.endTime != null)
-        'endTime': ref.endTime!.microsecondsSinceEpoch,
-      if (full?.requestBody != null) 'requestBody': full!.requestBody,
-      if (full?.responseBody != null) 'responseBody': full!.responseBody,
-    };
   }
 
   Future<void> dispose() async {

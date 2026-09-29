@@ -10,7 +10,7 @@ Se a VM não expõe o profiler HTTP de `dart:io`, a sessão permanece `live`, ma
 
 ## Dados sensíveis
 
-O banco SQLite local e os arquivos exportados (HAR e DevTools JSON) guardam headers e bodies completos, inclusive `Authorization`, cookies e outros segredos. Trate esses arquivos como credenciais.
+Headers e bodies das requisições são gravados como arquivos individuais na pasta `bodies/` dentro do diretório de dados. O banco SQLite armazena apenas o índice (metadados, caminhos, tamanhos) — não os headers nem os bodies em si. Os arquivos exportados (HAR e DevTools JSON) compilam esses dados e podem conter `Authorization`, cookies e outros segredos. Trate o diretório de dados e os exports como credenciais.
 
 O diretório de dados do servidor é criado com permissões restritas ao usuário (por exemplo `chmod 700` no Unix).
 
@@ -37,11 +37,13 @@ Documentação completa (fluxo, shapes JSON, erros, bodies): [docs/mcp.md](docs/
 | `list_sessions`        | `state`: `live` (padrão), `history` ou `all`                                                     | Lista sessões conhecidas.                                                      |
 | `get_session`          | `vmUri`                                                                                          | Detalhes de uma sessão (app, URI, isolates, estado, profiler disponível).      |
 | `attach_vm`            | `uri`                                                                                            | Attach manual à VM (HTTP ou WebSocket).                                        |
-| `list_requests`        | `vmUri`, `includeHistory` (padrão `false`), `limit`, `offset`, `method`, `status`, `urlContains` | Lista o call: método, URI, status, `durationMs` e bodies. Sem headers.         |
-| `get_request`          | `vmUri`, `requestId`, `startTime` (opcional), `includeHistory`                                   | O mesmo call com headers, isolate, tamanhos e body.                            |
-| `export_har`           | `vmUri`, `includeHistory`                                                                        | Exporta HAR para o diretório de dados e devolve `path`, contagem e tamanho.    |
-| `export_devtools_json` | `vmUri`, `includeHistory`                                                                        | Exporta snapshot offline compatível com DevTools; mesmos metadados de retorno. |
-| `delete_session`       | `vmUri`                                                                                          | Desconecta se `live` e apaga a sessão e requests armazenados.                  |
+| `list_requests`        | `vmUri`, `includeHistory` (padrão `false`), `limit`, `offset`, `method`, `status`, `urlContains` | Lista o call: método, URI, status, `durationMs` e sizes. Sem body e sem headers. |
+| `get_request`          | `vmUri`, `requestId`, `startTime` (opcional), `includeHistory`                                   | O mesmo call com headers, isolate, tamanhos e body (teto de 100000 caracteres). |
+| `export_har`           | `vmUri`, `includeHistory`                                                                        | Exporta HAR para o diretório de dados e devolve `path`, contagem e tamanho.     |
+| `export_devtools_json` | `vmUri`, `includeHistory`                                                                        | Exporta snapshot offline compatível com DevTools; mesmos metadados de retorno.  |
+| `delete_session`       | `vmUri`                                                                                          | Desconecta se `live` e apaga sessão, requests, pasta `bodies/` e exports.       |
+| `get_retention`        | (nenhum)                                                                                         | Devolve `{ "retentionDays": <days> }`. Padrão 90.                               |
+| `set_retention`        | `days` (inteiro ≥ 1)                                                                             | Grava o prazo e varre sessões `history` expiradas, inclusive exports.           |
 
 ## Sessões `live` e `history`
 

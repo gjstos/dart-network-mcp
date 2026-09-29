@@ -1,6 +1,8 @@
 import 'dart:io';
+import 'dart:typed_data';
 
 import 'package:dart_network_mcp/src/session_store.dart';
+import 'package:dart_network_mcp/src/traffic_files.dart';
 import 'package:dart_network_mcp/src/vm_session.dart';
 import 'package:dart_network_mcp/src/vm_uri.dart';
 import 'package:test/test.dart';
@@ -15,7 +17,7 @@ void main() {
   setUp(() async {
     tempDir = Directory.systemTemp.createTempSync('dart-network-mcp-session');
     dbPath = '${tempDir.path}/network.sqlite';
-    store = SessionStore.open(dbPath);
+    store = SessionStore.open(dbPath, dataDirectory: tempDir.path);
   });
 
   tearDown(() async {
@@ -177,8 +179,7 @@ void main() {
       await session.pollOnce();
 
       final row = store.listRequests(vmUri: key).single;
-      expect(row.responseBody?.length, 1000000);
-      expect(row.responseBodyTruncated, isTrue);
+      expect(File(row.responseBodyPath!).lengthSync(), 1000001);
       expect(row.responseBodySize, 1000001);
       await session.dispose();
       await fake.close();
@@ -367,5 +368,161 @@ void main() {
       await flutterFake.close();
       await plainFake.close();
     });
+
+    test(
+        'stores a body larger than 1 MB in a file and does not clear while one request is in flight',
+        () async {
+      final fake = await FakeVmService.start();
+      final session = await attachFake(fake);
+      final key = canonicalizeVmUri(fake.consoleHttpUri);
+
+      final big = List<int>.filled(1000001, 9);
+      fake.addRequest(
+        sampleRequest(id: 'big-done', startTime: 2000, responseBody: big),
+      );
+      fake.addRequest(
+        FakeHttpProfileEntry(
+          id: 'in-flight',
+          method: 'GET',
+          uri: 'https://example.com/in-flight',
+          startTime: 2100,
+        ),
+      );
+      await session.pollOnce();
+
+      final rows = store.listRequests(vmUri: key);
+      final row = rows.singleWhere((r) => r.requestId == 'big-done');
+      expect(row.responseBodySize, 1000001);
+      expect(File(row.responseBodyPath!).lengthSync(), 1000001);
+      expect(fake.clearHttpProfileCalls, 0);
+
+      await session.dispose();
+      await fake.close();
+    });
+
+    test('clears the http profile when every request in the isolate has ended',
+        () async {
+      final fake = await FakeVmService.start();
+      final session = await attachFake(fake);
+
+      fake.addRequest(sampleRequest(id: 'done-1', startTime: 3000));
+      fake.addRequest(sampleRequest(id: 'done-2', startTime: 3100));
+      await session.pollOnce();
+
+      expect(fake.clearHttpProfileCalls, 1);
+
+      await session.dispose();
+      await fake.close();
+    });
+
+    test(
+        'clearHttpProfile is not called when in-flight request is absent from updatedSince delta',
+        () async {
+      final fake = await FakeVmService.start();
+      final session = await attachFake(fake);
+      final key = canonicalizeVmUri(fake.consoleHttpUri);
+
+      fake.addRequest(
+        FakeHttpProfileEntry(
+          id: 'in-flight-hidden',
+          method: 'GET',
+          uri: 'https://example.com/in-flight-hidden',
+          startTime: 4000,
+        ),
+      );
+      await session.pollOnce();
+      expect(fake.clearHttpProfileCalls, 0,
+          reason: 'in-flight request visible on first poll, must not clear');
+
+      await session.pollOnce();
+      expect(fake.clearHttpProfileCalls, 0,
+          reason: 'in-flight request absent from updatedSince delta but still tracked, must not clear');
+
+      await session.dispose();
+      await fake.close();
+    });
+
+    test('persist failure does not advance timestamp so request is visible on next pollOnce',
+        () async {
+      var shouldThrow = true;
+      final failStore = SessionStore.open(
+        '${tempDir.path}/fail.sqlite',
+        dataDirectory: tempDir.path,
+        files: _ThrowingFileStore(
+          TrafficFiles(tempDir.path),
+          shouldThrow: () => shouldThrow,
+        ),
+      );
+      addTearDown(failStore.close);
+
+      final fake = await FakeVmService.start();
+      addTearDown(fake.close);
+      final canonical = canonicalizeVmUri(fake.consoleHttpUri);
+      final session = await VmSession.attach(
+        store: failStore,
+        rawUri: fake.consoleHttpUri,
+        socketUri: Uri.parse(canonical),
+        enableTimer: false,
+      );
+      addTearDown(session.dispose);
+
+      fake.addRequest(sampleRequest(id: 'persist-fail', startTime: 5000));
+      await session.pollOnce();
+      expect(failStore.listRequests(vmUri: canonical), isEmpty);
+
+      shouldThrow = false;
+      await session.pollOnce();
+      final rows = failStore.listRequests(vmUri: canonical);
+      expect(rows.length, 1);
+      expect(rows.single.requestId, 'persist-fail');
+    });
   });
+}
+
+class _ThrowingFileStore implements TrafficFileStore {
+  _ThrowingFileStore(this._delegate, {required bool Function() shouldThrow})
+      : _shouldThrow = shouldThrow;
+
+  final TrafficFileStore _delegate;
+  final bool Function() _shouldThrow;
+
+  @override
+  WrittenTraffic write({
+    required String vmUri,
+    required String requestId,
+    required int startTime,
+    required Map<String, String> requestHeaders,
+    required Map<String, String> responseHeaders,
+    Uint8List? requestBody,
+    Uint8List? responseBody,
+  }) {
+    if (_shouldThrow()) throw StateError('simulated write failure');
+    return _delegate.write(
+      vmUri: vmUri,
+      requestId: requestId,
+      startTime: startTime,
+      requestHeaders: requestHeaders,
+      responseHeaders: responseHeaders,
+      requestBody: requestBody,
+      responseBody: responseBody,
+    );
+  }
+
+  @override
+  Uint8List? readBytes(String path) => _delegate.readBytes(path);
+
+  @override
+  HeaderMaps readHeaders(String path) => _delegate.readHeaders(path);
+
+  @override
+  void deleteSessionFiles(String vmUri) => _delegate.deleteSessionFiles(vmUri);
+
+  @override
+  void deleteExportFiles(String vmUri) => _delegate.deleteExportFiles(vmUri);
+
+  @override
+  String sessionDirectory(String vmUri) => _delegate.sessionDirectory(vmUri);
+
+  @override
+  String exportHash8(String vmUri) => _delegate.exportHash8(vmUri);
 }

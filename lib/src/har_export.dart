@@ -1,10 +1,48 @@
 import 'dart:convert';
 import 'dart:typed_data';
 
-import 'package:dart_network_mcp/src/session_store.dart';
+class ExportableRequest {
+  ExportableRequest({
+    required this.vmUri,
+    required this.requestId,
+    required this.isolateId,
+    required this.method,
+    required this.uri,
+    required this.startTime,
+    required this.endTime,
+    required this.statusCode,
+    required this.reasonPhrase,
+    required this.requestHeaders,
+    required this.responseHeaders,
+    required this.requestBody,
+    required this.responseBody,
+    required this.requestBodySize,
+    required this.responseBodySize,
+    required this.bodyUnavailable,
+    required this.error,
+  });
+
+  final String vmUri;
+  final String requestId;
+  final String isolateId;
+  final String method;
+  final String uri;
+  final int startTime;
+  final int? endTime;
+  final int? statusCode;
+  final String? reasonPhrase;
+  final Map<String, String> requestHeaders;
+  final Map<String, String> responseHeaders;
+  final Uint8List? requestBody;
+  final Uint8List? responseBody;
+  final int requestBodySize;
+  final int responseBodySize;
+  final bool bodyUnavailable;
+  final String? error;
+}
 
 Map<String, Object?> buildHar(
-  List<RequestRecord> requests, {
+  List<ExportableRequest> requests, {
   required String version,
 }) {
   return {
@@ -14,24 +52,24 @@ Map<String, Object?> buildHar(
         'name': 'dart-network-mcp',
         'version': version,
       },
-      'entries': requests.map(_entryFromRequest).toList(),
+      'entries': requests.map(harEntry).toList(),
     },
   };
 }
 
-Map<String, Object?> _entryFromRequest(RequestRecord record) {
-  final timeMs = record.endTime == null
+Map<String, Object?> harEntry(ExportableRequest request) {
+  final timeMs = request.endTime == null
       ? 0
-      : (record.endTime! - record.startTime) ~/ 1000;
+      : (request.endTime! - request.startTime) ~/ 1000;
 
   return {
     'startedDateTime': DateTime.fromMicrosecondsSinceEpoch(
-      record.startTime,
+      request.startTime,
       isUtc: true,
     ).toIso8601String(),
     'time': timeMs,
-    'request': _harRequest(record),
-    'response': _harResponse(record),
+    'request': _harRequest(request),
+    'response': _harResponse(request),
     'cache': <String, Object?>{},
     'timings': {
       'blocked': -1,
@@ -45,31 +83,36 @@ Map<String, Object?> _entryFromRequest(RequestRecord record) {
   };
 }
 
-Map<String, Object?> _harRequest(RequestRecord record) {
-  final parsed = Uri.parse(record.uri);
-  final request = <String, Object?>{
-    'method': record.method,
-    'url': record.uri,
+Map<String, Object?> _harRequest(ExportableRequest request) {
+  final parsed = Uri.parse(request.uri);
+  final result = <String, Object?>{
+    'method': request.method,
+    'url': request.uri,
     'httpVersion': 'HTTP/1.1',
-    'headers': _harHeaders(record.requestHeaders),
+    'headers': _harHeaders(request.requestHeaders),
     'queryString': parsed.queryParameters.entries
         .map((e) => {'name': e.key, 'value': e.value})
         .toList(),
   };
-  if (record.requestBody != null) {
-    request['postData'] = _harPostData(record.requestBody!);
+  final body = request.requestBody;
+  if (body != null) {
+    final encoded = _encodeBodyText(body);
+    result['postData'] = {
+      'mimeType': _mimeType(request.requestHeaders),
+      if (encoded.encoding != null) 'encoding': encoded.encoding,
+      'text': encoded.text,
+    };
   }
-  return request;
+  return result;
 }
 
-Map<String, Object?> _harResponse(RequestRecord record) {
-  final response = <String, Object?>{
-    'status': record.statusCode ?? 0,
-    'statusText': record.reasonPhrase ?? '',
-    'headers': _harHeaders(record.responseHeaders),
-    'content': _harContent(record.responseBody),
+Map<String, Object?> _harResponse(ExportableRequest request) {
+  return {
+    'status': request.statusCode ?? 0,
+    'statusText': request.reasonPhrase ?? '',
+    'headers': _harHeaders(request.responseHeaders),
+    'content': _harContent(request.responseBody, request.responseHeaders),
   };
-  return response;
 }
 
 List<Map<String, String>> _harHeaders(Map<String, String> headers) {
@@ -78,26 +121,30 @@ List<Map<String, String>> _harHeaders(Map<String, String> headers) {
       .toList();
 }
 
-Map<String, Object?> _harPostData(Uint8List body) {
+Map<String, Object?> _harContent(
+  Uint8List? body,
+  Map<String, String> headers,
+) {
+  final mimeType = _mimeType(headers);
+  if (body == null) {
+    return {'mimeType': mimeType, 'size': 0};
+  }
   final encoded = _encodeBodyText(body);
   return {
-    'mimeType': 'application/octet-stream',
+    'mimeType': mimeType,
+    'size': body.length,
     if (encoded.encoding != null) 'encoding': encoded.encoding,
     'text': encoded.text,
   };
 }
 
-Map<String, Object?> _harContent(Uint8List? body) {
-  if (body == null) {
-    return {'mimeType': 'application/octet-stream', 'size': 0};
+String _mimeType(Map<String, String> headers) {
+  for (final entry in headers.entries) {
+    if (entry.key.toLowerCase() == 'content-type') {
+      return entry.value;
+    }
   }
-  final encoded = _encodeBodyText(body);
-  return {
-    'mimeType': 'application/octet-stream',
-    'size': body.length,
-    if (encoded.encoding != null) 'encoding': encoded.encoding,
-    'text': encoded.text,
-  };
+  return 'application/octet-stream';
 }
 
 ({String text, String? encoding}) _encodeBodyText(Uint8List body) {

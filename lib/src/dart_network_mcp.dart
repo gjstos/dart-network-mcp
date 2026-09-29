@@ -12,6 +12,8 @@ import 'tool_json.dart';
 import 'vm_session.dart';
 import 'vm_uri.dart';
 
+const int toolResponseCharBudget = 100000;
+
 class DartNetworkMcp {
   DartNetworkMcp({
     required this.store,
@@ -225,11 +227,12 @@ class DartNetworkMcp {
       } else {
         row = rows.single;
       }
-      return {
-        'vmUri': vmUri,
-        'state': record.state,
-        'request': _requestDetail(row),
-      };
+      return _fitGetRequestEnvelope(
+        vmUri: vmUri,
+        state: record.state,
+        request: _requestDetail(row),
+        row: row,
+      );
     });
   }
 
@@ -245,8 +248,6 @@ class DartNetworkMcp {
       vmUri: key.canonical!,
       includeHistory: includeHistory,
       extension: 'har',
-      build: (requests, isFlutterApp) =>
-          buildHar(requests, version: version),
     );
   }
 
@@ -262,11 +263,6 @@ class DartNetworkMcp {
       vmUri: key.canonical!,
       includeHistory: includeHistory,
       extension: 'json',
-      build: (requests, isFlutterApp) => buildDevToolsSnapshot(
-        requests,
-        version: version,
-        isFlutterApp: isFlutterApp,
-      ),
     );
   }
 
@@ -287,19 +283,46 @@ class DartNetworkMcp {
         await live.dispose();
       }
       store.deleteSession(vmUri);
+      store.files.deleteSessionFiles(vmUri);
+      store.files.deleteExportFiles(vmUri);
       return {'vmUri': vmUri, 'state': state, 'deleted': true};
     });
+  }
+
+  Map<String, Object?> getRetention() {
+    return _runStore(() => {'retentionDays': store.retentionDays()});
+  }
+
+  Map<String, Object?> setRetention(int days) {
+    if (days < 1) {
+      return toolError('invalid_params', 'days must be an integer >= 1');
+    }
+    return _runStore(() {
+      store.setRetentionDays(days);
+      sweepRetention();
+      return {'retentionDays': store.retentionDays()};
+    });
+  }
+
+  int sweepRetention({int? nowMicros}) {
+    try {
+      final now = nowMicros ?? DateTime.now().microsecondsSinceEpoch;
+      final uris = store.historyVmUrisPastRetention(now);
+      for (final vmUri in uris) {
+        store.deleteSession(vmUri);
+        store.files.deleteSessionFiles(vmUri);
+        store.files.deleteExportFiles(vmUri);
+      }
+      return uris.length;
+    } on SqliteException {
+      return 0;
+    }
   }
 
   Map<String, Object?> _export({
     required String vmUri,
     required bool includeHistory,
     required String extension,
-    required Map<String, Object?> Function(
-      List<RequestRecord> requests,
-      bool isFlutterApp,
-    )
-        build,
   }) {
     return _runStore(() {
       final guard = _trafficGuard(vmUri, includeHistory);
@@ -307,18 +330,21 @@ class DartNetworkMcp {
         return guard;
       }
       final record = store.getSession(vmUri)!;
-      final requests = _allStoredRequests(vmUri);
       final isFlutterApp = _liveSessions[vmUri]?.isFlutterApp ?? false;
-      final document = build(requests, isFlutterApp);
+      var requestCount = 0;
       final path = _writeExportFile(
         vmUri: vmUri,
         extension: extension,
-        contents: jsonEncode(document),
+        write: (file) {
+          requestCount = extension == 'har'
+              ? _writeHarIncrementally(file, vmUri)
+              : _writeDevToolsIncrementally(file, vmUri, isFlutterApp);
+        },
       );
       final bytes = File(path).lengthSync();
       return {
         'path': path,
-        'requestCount': requests.length,
+        'requestCount': requestCount,
         'bytes': bytes,
         'vmUri': vmUri,
         'state': record.state,
@@ -329,16 +355,96 @@ class DartNetworkMcp {
   String _writeExportFile({
     required String vmUri,
     required String extension,
-    required String contents,
+    required void Function(RandomAccessFile file) write,
   }) {
     final exportsDir = Directory('$dataDirectory/exports');
     exportsDir.createSync(recursive: true);
     final stamp = _exportTimestamp();
     final hash = sha1.convert(utf8.encode(vmUri)).toString().substring(0, 8);
     final fileName = 'dart_network_mcp_${stamp}_$hash.$extension';
-    final path = '${exportsDir.path}/$fileName';
-    File(path).writeAsStringSync(contents);
-    return path;
+    final finalPath = '${exportsDir.path}/$fileName';
+    final tmpPath = '$finalPath.tmp';
+    final file = File(tmpPath).openSync(mode: FileMode.write);
+    try {
+      write(file);
+    } catch (e) {
+      file.closeSync();
+      try {
+        File(tmpPath).deleteSync();
+      } catch (_) {}
+      rethrow;
+    }
+    file.closeSync();
+    File(tmpPath).renameSync(finalPath);
+    return finalPath;
+  }
+
+  int _writeHarIncrementally(RandomAccessFile file, String vmUri) {
+    file.writeStringSync(
+      '{"log":{"version":"1.2","creator":{"name":"dart-network-mcp",'
+      '"version":${jsonEncode(version)}},"entries":[',
+    );
+    var count = 0;
+    for (final row in _iterateStoredRequests(vmUri)) {
+      if (count > 0) {
+        file.writeStringSync(',');
+      }
+      file.writeStringSync(jsonEncode(harEntry(_exportableFromRow(row))));
+      count++;
+    }
+    file.writeStringSync(']}}');
+    return count;
+  }
+
+  int _writeDevToolsIncrementally(
+    RandomAccessFile file,
+    String vmUri,
+    bool isFlutterApp,
+  ) {
+    file.writeStringSync(
+      '{"devToolsSnapshot":true,"devToolsVersion":${jsonEncode('dart-network-mcp/$version')},'
+      '"activeScreenId":"network","connectedApp":{"isFlutterApp":$isFlutterApp,'
+      '"isProfileBuild":false,"isDartWebApp":false,"isRunningOnDartVM":true},'
+      '"network":{"httpRequestData":[',
+    );
+    var count = 0;
+    for (final row in _iterateStoredRequests(vmUri)) {
+      if (count > 0) {
+        file.writeStringSync(',');
+      }
+      file.writeStringSync(
+        jsonEncode({'request': devToolsRequest(_exportableFromRow(row))}),
+      );
+      count++;
+    }
+    file.writeStringSync(
+      '],"selectedRequestId":null,"socketData":[],'
+      '"webSocketData":[],"timelineMicrosOffset":0}}',
+    );
+    return count;
+  }
+
+  ExportableRequest _exportableFromRow(RequestRecord row) {
+    final headers = store.files.readHeaders(row.headersPath);
+    return ExportableRequest(
+      vmUri: row.vmUri,
+      requestId: row.requestId,
+      isolateId: row.isolateId,
+      method: row.method,
+      uri: row.uri,
+      startTime: row.startTime,
+      endTime: row.endTime,
+      statusCode: row.statusCode,
+      reasonPhrase: row.reasonPhrase,
+      requestHeaders: headers.requestHeaders,
+      responseHeaders: headers.responseHeaders,
+      requestBody: _readBody(row.requestBodyPath),
+      responseBody: _readBody(row.responseBodyPath),
+      requestBodySize: row.requestBodySize,
+      responseBodySize: row.responseBodySize,
+      bodyUnavailable: row.bodyUnavailable,
+      error: row.error,
+    );
   }
 
   String _exportTimestamp() {
@@ -409,26 +515,65 @@ class DartNetworkMcp {
       'uri': record.uri,
       'statusCode': record.statusCode,
       if (durationMs != null) 'durationMs': durationMs,
-      if (record.requestBodyTruncated) 'requestBodyTruncated': true,
-      if (record.requestBodyTruncated) 'requestBodySize': record.requestBodySize,
-      if (record.responseBodyTruncated) 'responseBodyTruncated': true,
-      if (record.responseBodyTruncated) 'responseBodySize': record.responseBodySize,
-      if (record.bodyUnavailable) 'bodyUnavailable': true,
+      'requestBodySize': record.requestBodySize,
+      'responseBodySize': record.responseBodySize,
+      'bodyUnavailable': record.bodyUnavailable,
       if (record.error != null) 'error': record.error,
-      ..._bodyFields('request', _nonEmptyBody(record.requestBody)),
-      ..._bodyFields('response', record.responseBody),
     };
   }
 
-  Uint8List? _nonEmptyBody(Uint8List? bytes) {
-    if (bytes == null || bytes.isEmpty) {
+  Uint8List? _readBody(String? path) {
+    if (path == null) {
       return null;
     }
-    return bytes;
+    return store.files.readBytes(path);
+  }
+
+  Map<String, Object?> _fitGetRequestEnvelope({
+    required String vmUri,
+    required String state,
+    required Map<String, Object?> request,
+    required RequestRecord row,
+  }) {
+    final envelope = <String, Object?>{
+      'vmUri': vmUri,
+      'state': state,
+      'request': request,
+    };
+    while (jsonEncode(envelope).length > toolResponseCharBudget) {
+      if (request.containsKey('responseBody')) {
+        request.remove('responseBody');
+        request.remove('responseBodyEncoding');
+        final path = row.responseBodyPath;
+        if (path != null) {
+          request['responseBodyPath'] = path;
+        }
+        continue;
+      }
+      if (request.containsKey('requestBody')) {
+        request.remove('requestBody');
+        request.remove('requestBodyEncoding');
+        final path = row.requestBodyPath;
+        if (path != null) {
+          request['requestBodyPath'] = path;
+        }
+        continue;
+      }
+      if (request.containsKey('requestHeaders') ||
+          request.containsKey('responseHeaders')) {
+        request.remove('requestHeaders');
+        request.remove('responseHeaders');
+        request['headersPath'] = row.headersPath;
+        continue;
+      }
+      break;
+    }
+    return envelope;
   }
 
   Map<String, Object?> _requestDetail(RequestRecord record) {
-    return {
+    final headers = store.files.readHeaders(record.headersPath);
+    final result = <String, Object?>{
       'requestId': record.requestId,
       'isolateId': record.isolateId,
       'method': record.method,
@@ -437,17 +582,28 @@ class DartNetworkMcp {
       if (record.endTime != null) 'endTime': record.endTime,
       'statusCode': record.statusCode,
       'reasonPhrase': record.reasonPhrase,
-      'requestHeaders': record.requestHeaders,
-      'responseHeaders': record.responseHeaders,
+      'requestHeaders': headers.requestHeaders,
+      'responseHeaders': headers.responseHeaders,
       'requestBodySize': record.requestBodySize,
       'responseBodySize': record.responseBodySize,
-      'requestBodyTruncated': record.requestBodyTruncated,
-      'responseBodyTruncated': record.responseBodyTruncated,
       'bodyUnavailable': record.bodyUnavailable,
       if (record.error != null) 'error': record.error,
-      ..._bodyFields('request', record.requestBody),
-      ..._bodyFields('response', record.responseBody),
     };
+    if (record.responseBodySize > toolResponseCharBudget) {
+      if (record.responseBodyPath != null) {
+        result['responseBodyPath'] = record.responseBodyPath;
+      }
+    } else {
+      result.addAll(_bodyFields('response', _readBody(record.responseBodyPath)));
+    }
+    if (record.requestBodySize > toolResponseCharBudget) {
+      if (record.requestBodyPath != null) {
+        result['requestBodyPath'] = record.requestBodyPath;
+      }
+    } else {
+      result.addAll(_bodyFields('request', _readBody(record.requestBodyPath)));
+    }
+    return result;
   }
 
   Map<String, Object?> _bodyFields(String prefix, Uint8List? bytes) {
@@ -493,9 +649,8 @@ class DartNetworkMcp {
     }
   }
 
-  List<RequestRecord> _allStoredRequests(String vmUri) {
+  Iterable<RequestRecord> _iterateStoredRequests(String vmUri) sync* {
     const pageSize = 200;
-    final all = <RequestRecord>[];
     var offset = 0;
     while (true) {
       final page = store.listRequests(
@@ -506,13 +661,12 @@ class DartNetworkMcp {
       if (page.isEmpty) {
         break;
       }
-      all.addAll(page);
+      yield* page;
       if (page.length < pageSize) {
         break;
       }
       offset += page.length;
     }
-    return all;
   }
 
   ({Map<String, Object?>? error, String? canonical}) _canonicalKeyOrError(
