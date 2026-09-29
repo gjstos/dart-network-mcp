@@ -4,7 +4,8 @@ RUN apt-get update \
   && ln -sf "$(find /usr/lib -name 'libsqlite3.so.0' | head -1)" /usr/lib/libsqlite3.so \
   && rm -rf /var/lib/apt/lists/* \
   && useradd --create-home --home-dir /home/mcp mcp \
-  && mkdir -p /data /home/mcp/.dart-tool \
+  && mkdir -p /data /home/mcp/.dart-tool /home/mcp/Dart/dtd \
+  && chmod 755 /home/mcp \
   && chown -R mcp:mcp /data /home/mcp
 WORKDIR /app
 COPY pubspec.yaml pubspec.lock ./

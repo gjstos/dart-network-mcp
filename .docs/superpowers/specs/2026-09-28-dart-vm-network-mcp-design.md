@@ -96,6 +96,8 @@ Não há expurgo automático.
 
 ## Descoberta e captura
 
+> **Atualização (2026-09-29):** a descoberta em produção não depende mais só de `~/.dart-tool`. Ver [.docs/superpowers/specs/2026-09-29-dtd-discovery-docker-fix-design.md](2026-09-29-dtd-discovery-docker-fix-design.md) (dir moderno `…/Dart/dtd`, `wsUri`, multi-DTD, mount Docker, `socketUriFor` no DTD). O texto abaixo é o contrato original e ficou parcialmente supersedido nesse ponto.
+
 A descoberta roda a cada 2 segundos, dentro do processo do servidor. O binário `dart` do host não é executado no container: no macOS e no Windows esse binário não roda na imagem Linux. O que o container lê é o `~/.dart-tool` do host, montado em `/home/mcp/.dart-tool`, com `HOME=/home/mcp`.
 
 Ordem, parando na primeira URI de DTD que conectar:

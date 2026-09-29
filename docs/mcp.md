@@ -66,7 +66,7 @@ export_har / export_devtools_json
 ```
 
 1. Suba o app em debug (não-web se for usar o profiler `dart:io`).
-2. A descoberta interna lê DTD / `~/.dart-tool` a cada 2s e anexa URIs novas. Se precisar, chame `attach_vm` com a URI do console (`http://…` ou `ws://…/ws`).
+2. A descoberta interna roda a cada 2s e anexa URIs novas. Ordem das fontes de DTD: env `DTD_URI`; arquivos em `…/Dart/dtd/<pid>` (campo `wsUri`, path macOS `~/Library/Application Support/Dart/dtd`, override `DART_NETWORK_MCP_DTD_DIR`); depois `~/.dart-tool` (legado, nomes com `dtd` / `tooling-daemon`). O servidor mantém conexão com **todos** os DTDs encontrados (ex.: IDE e `flutter run`). No Docker o install monta o dir moderno e reescreve loopback do DTD para `host.docker.internal`. Se ainda faltar sessão, chame `attach_vm` com a URI do console (`http://…` ou `ws://…/ws`).
 3. Consulte com `list_requests` / `get_request`.
 4. Exporte HAR 1.2 ou o snapshot offline do DevTools.
 
@@ -716,10 +716,11 @@ flutter run -d <id>   # iOS, Android ou desktop — não web para o profiler
 - A cada 5s: lote `POST`/`PUT`/`PATCH` ou `DELETE` + dois GETs.
 - Pausar na UI segura o lote seguinte.
 
-Copie a URI impressa, use `attach_vm` se necessário, e confira com `list_requests`.
+Com o MCP instalado, a descoberta costuma anexar sozinha. Confira com `list_sessions` / `list_requests`. Se a sessão não aparecer, use `attach_vm` com a URI do console.
 
 ## Referências
 
 - Overview: [README.md](../README.md)
 - Design / contrato: [.docs/superpowers/specs/2026-09-28-dart-vm-network-mcp-design.md](../.docs/superpowers/specs/2026-09-28-dart-vm-network-mcp-design.md)
+- Descoberta DTD no Docker (correção): [.docs/superpowers/specs/2026-09-29-dtd-discovery-docker-fix-design.md](../.docs/superpowers/specs/2026-09-29-dtd-discovery-docker-fix-design.md)
 - Armazenamento e tools: [.docs/superpowers/specs/2026-09-29-traffic-storage-performance-design.md](../.docs/superpowers/specs/2026-09-29-traffic-storage-performance-design.md)

@@ -4,7 +4,9 @@ Servidor MCP que faz attach em VMs Dart já em execução e expõe o tráfego HT
 
 ## Alvos
 
-iOS, Android e desktop usam o mesmo fluxo de attach. A URI impressa pelo tooling (`flutter run`, DevTools, etc.) é a chave da sessão.
+iOS, Android e desktop usam o mesmo fluxo de attach. A URI da VM (`vmUri`) é a chave da sessão.
+
+Com o servidor instalado via Docker, a descoberta lê o Dart Tooling Daemon no host (em macOS: `~/Library/Application Support/Dart/dtd/<pid>`) e anexa sessões sozinha — em geral **não** é preciso `attach_vm`. Esse tool continua como fallback se a descoberta não pegar a VM.
 
 Se a VM não expõe o profiler HTTP de `dart:io`, a sessão permanece `live`, mas as tools de tráfego respondem com o erro `http_profile_unavailable` (por exemplo em alguns alvos como Flutter web).
 
@@ -69,4 +71,4 @@ A cada **5 segundos**, um lote de três calls em paralelo. Os lotes alternam `PO
 
 `main` liga `HttpClient.enableTimelineLogging` antes do `runApp`. O profiler do `dart:io` só grava um request se o flag já estiver ativo quando ele começa. O servidor também chama `httpEnableTimelineLogging`, mas esse RPC chega depois do primeiro GET de um hot restart.
 
-Copie a URI da VM que o tooling imprimir, use `attach_vm` se ainda não estiver anexada, e consulte o tráfego com `list_requests` / `get_request` ou exporte com `export_har` / `export_devtools_json`.
+Com o MCP instalado (Docker), a descoberta anexa a VM sozinha via DTD (`list_sessions` sem `attach_vm`). Detalhes e fallback: [docs/mcp.md](docs/mcp.md). Depois use `list_requests` / `get_request` ou exporte com `export_har` / `export_devtools_json`.

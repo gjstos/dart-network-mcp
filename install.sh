@@ -53,12 +53,32 @@ is_windows_msys() {
   esac
 }
 
+resolve_dart_dtd_dir() {
+  if [[ -n "${DART_NETWORK_MCP_DTD_DIR:-}" ]]; then
+    printf '%s' "$DART_NETWORK_MCP_DTD_DIR"
+    return
+  fi
+  if is_windows_msys; then
+    printf '%s' "${LOCALAPPDATA:-$home/AppData/Local}/Dart/dtd"
+    return
+  fi
+  case "$(uname -s 2>/dev/null || true)" in
+    Darwin)
+      printf '%s' "$home/Library/Application Support/Dart/dtd"
+      ;;
+    *)
+      printf '%s' "${XDG_DATA_HOME:-$home/.local/share}/Dart/dtd"
+      ;;
+  esac
+}
+
 data_dir="$(resolve_data_dir)"
 dart_tool_dir="$home/.dart-tool"
+dart_dtd_dir="$(resolve_dart_dtd_dir)"
 catalog_dir="$home/.docker/mcp/catalogs"
 catalog_file="$catalog_dir/dart-network-mcp.yaml"
 
-mkdir -p "$data_dir" "$dart_tool_dir" "$catalog_dir"
+mkdir -p "$data_dir" "$dart_tool_dir" "$dart_dtd_dir" "$catalog_dir"
 
 if is_windows_msys; then
   if command -v icacls >/dev/null 2>&1 && [[ -n "${USERNAME:-}" ]]; then
@@ -69,6 +89,7 @@ else
 fi
 
 dart_tool_vol="$dart_tool_dir:/home/mcp/.dart-tool:ro"
+dart_dtd_vol="$dart_dtd_dir:/home/mcp/Dart/dtd:ro"
 data_vol="$data_dir:/data:rw"
 
 write_catalog() {
@@ -93,6 +114,7 @@ image: dart-network-mcp:local
 longLived: true
 volumes:
   - $dart_tool_vol
+  - $dart_dtd_vol
   - $data_vol
 env:
   - name: HOME
@@ -101,6 +123,8 @@ env:
     value: /data
   - name: DART_NETWORK_MCP_IN_DOCKER
     value: "1"
+  - name: DART_NETWORK_MCP_DTD_DIR
+    value: /home/mcp/Dart/dtd
 ${user_block}${extra_hosts_block}
 EOF
 }

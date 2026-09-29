@@ -74,6 +74,13 @@ exit 0
     expect(run, contains('-i'));
     expect(run, contains('--rm'));
     expect(run, contains('${home.path}/.dart-tool:/home/mcp/.dart-tool:ro'));
+    final dtdHost = Platform.isMacOS
+        ? '${home.path}/Library/Application Support/Dart/dtd'
+        : Platform.isWindows
+            ? '${home.path}/AppData/Local/Dart/dtd'
+            : '${home.path}/.local/share/Dart/dtd';
+    expect(run, contains('$dtdHost:/home/mcp/Dart/dtd:ro'));
+    expect(run, contains('-e DART_NETWORK_MCP_DTD_DIR=/home/mcp/Dart/dtd'));
     expect(run, contains('${data.path}:/data:rw'));
     expect(run, endsWith('dart-network-mcp:local'));
   });

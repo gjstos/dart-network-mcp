@@ -140,6 +140,16 @@ Future<List<String>> _discoverVmUris(DartToolingDaemon dtd) async {
   }
 }
 
+class _DtdConnection {
+  _DtdConnection({
+    required this.client,
+    required this.events,
+  });
+
+  final DartToolingDaemon client;
+  final StreamSubscription<DTDEvent> events;
+}
+
 class _DtdDiscovery {
   _DtdDiscovery({
     required this.mcp,
@@ -153,9 +163,7 @@ class _DtdDiscovery {
   final bool inDocker;
   final String dataDirectory;
 
-  DartToolingDaemon? _dtd;
-  StreamSubscription<DTDEvent>? _vmEvents;
-  String? _connectedUri;
+  final Map<String, _DtdConnection> _connections = {};
   late final Directory _emptyDartToolDir;
 
   void start() {
@@ -182,23 +190,38 @@ class _DtdDiscovery {
     return dir;
   }
 
+  Directory? _dartDtdDirectory() {
+    final dir = defaultDartDtdDirectory();
+    try {
+      if (!dir.existsSync()) {
+        return null;
+      }
+    } on FileSystemException {
+      return null;
+    }
+    return dir;
+  }
+
   Future<void> _tick() async {
     try {
       final uris = discoverDtdUris(
         dtdUriEnv: Platform.environment['DTD_URI'],
+        dartDtdDir: _dartDtdDirectory(),
         dartToolDir: _dartToolDirectory(),
       );
-      if (uris.isEmpty) {
-        return;
-      }
-      if (_dtd != null && _connectedUri != null && uris.contains(_connectedUri)) {
-        await _syncVmUris(_dtd!);
-        return;
+      final wanted = uris.toSet();
+      for (final uri in _connections.keys.toList()) {
+        if (!wanted.contains(uri)) {
+          await _drop(uri);
+        }
       }
       for (final uri in uris) {
-        if (await _tryConnect(uri)) {
-          return;
+        final existing = _connections[uri];
+        if (existing != null) {
+          await _syncVmUris(existing.client);
+          continue;
         }
+        await _tryConnect(uri);
       }
     } catch (e, st) {
       _log('DTD discovery error: $e\n$st');
@@ -207,19 +230,18 @@ class _DtdDiscovery {
 
   Future<bool> _tryConnect(String wsUri) async {
     try {
-      await _disconnect();
-      final client = await DartToolingDaemon.connect(Uri.parse(wsUri));
+      final socket = socketUriFor(Uri.parse(wsUri), inDocker: inDocker);
+      final client = await DartToolingDaemon.connect(socket);
       await client.streamListen(ConnectedAppServiceConstants.serviceName);
-      _vmEvents = client.onVmServiceUpdate().listen(
+      final events = client.onVmServiceUpdate().listen(
         (event) => unawaited(_onVmServiceEvent(event)),
         onError: (Object e) => _log('DTD VM event stream error: $e'),
       );
-      _dtd = client;
-      _connectedUri = wsUri;
+      _connections[wsUri] = _DtdConnection(client: client, events: events);
       unawaited(
         client.done.whenComplete(() {
-          if (_dtd == client) {
-            unawaited(_disconnect());
+          if (_connections[wsUri]?.client == client) {
+            unawaited(_drop(wsUri));
           }
         }),
       );
@@ -231,17 +253,15 @@ class _DtdDiscovery {
     }
   }
 
-  Future<void> _disconnect() async {
-    await _vmEvents?.cancel();
-    _vmEvents = null;
-    final client = _dtd;
-    _dtd = null;
-    _connectedUri = null;
-    if (client != null) {
-      try {
-        await client.close();
-      } catch (_) {}
+  Future<void> _drop(String wsUri) async {
+    final conn = _connections.remove(wsUri);
+    if (conn == null) {
+      return;
     }
+    await conn.events.cancel();
+    try {
+      await conn.client.close();
+    } catch (_) {}
   }
 
   Future<void> _syncVmUris(DartToolingDaemon dtd) async {
