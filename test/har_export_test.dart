@@ -1,8 +1,8 @@
 import 'dart:convert';
 import 'dart:typed_data';
 
-import 'package:dart_vm_mcp/src/har_export.dart';
-import 'package:dart_vm_mcp/src/session_store.dart';
+import 'package:dart_network_mcp/src/har_export.dart';
+import 'package:dart_network_mcp/src/session_store.dart';
 import 'package:test/test.dart';
 
 void main() {
@@ -47,7 +47,7 @@ void main() {
       expect(log['version'], '1.2');
 
       final creator = log['creator'] as Map<String, Object?>;
-      expect(creator['name'], 'dart-vm-mcp');
+      expect(creator['name'], 'dart-network-mcp');
       expect(creator['version'], harVersion);
 
       final entries = log['entries'] as List<Object?>;

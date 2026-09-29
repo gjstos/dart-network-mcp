@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Task 15 acceptance orchestrator: flutter run + native DartVmMcp driver."""
+"""Task 15 acceptance orchestrator: flutter run + native DartNetworkMcp driver."""
 from __future__ import annotations
 
 import json
@@ -20,7 +20,7 @@ VM_RE = re.compile(r"A Dart VM Service on .+ is available at: (http://\S+)")
 
 
 def main() -> int:
-    data_dir = Path(tempfile.mkdtemp(prefix="dart_vm_mcp_accept_"))
+    data_dir = Path(tempfile.mkdtemp(prefix="dart_network_mcp_accept_"))
     log_path = data_dir / "flutter.log"
     print(f"DATA_DIR={data_dir}", flush=True)
 
@@ -134,7 +134,7 @@ def main() -> int:
     needed = ["STEP3", "STEP4", "STEP5", "STEP6", "STEP7", "STEP8"]
     ok = all(results.get(k, "").startswith("PASS") for k in needed)
     print(f"ACCEPTANCE={'PASS' if ok else 'FAIL'}", flush=True)
-    print(f"NOTE=native long-lived DartVmMcp (Docker daemon unavailable)", flush=True)
+    print(f"NOTE=native long-lived DartNetworkMcp (Docker daemon unavailable)", flush=True)
     return 0 if ok else 1
 
 

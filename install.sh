@@ -35,15 +35,15 @@ if [[ -z "$home" ]]; then
 fi
 
 resolve_data_dir() {
-  if [[ -n "${DART_VM_MCP_DATA:-}" ]]; then
-    printf '%s' "$DART_VM_MCP_DATA"
+  if [[ -n "${DART_NETWORK_MCP_DATA:-}" ]]; then
+    printf '%s' "$DART_NETWORK_MCP_DATA"
     return
   fi
   if [[ -n "${LOCALAPPDATA:-}" ]]; then
-    printf '%s' "${LOCALAPPDATA}/dart-vm-mcp"
+    printf '%s' "${LOCALAPPDATA}/dart-network-mcp"
     return
   fi
-  printf '%s' "$home/.local/share/dart-vm-mcp"
+  printf '%s' "$home/.local/share/dart-network-mcp"
 }
 
 is_windows_msys() {
@@ -56,7 +56,7 @@ is_windows_msys() {
 data_dir="$(resolve_data_dir)"
 dart_tool_dir="$home/.dart-tool"
 catalog_dir="$home/.docker/mcp/catalogs"
-catalog_file="$catalog_dir/dart-vm-mcp.yaml"
+catalog_file="$catalog_dir/dart-network-mcp.yaml"
 
 mkdir -p "$data_dir" "$dart_tool_dir" "$catalog_dir"
 
@@ -73,7 +73,7 @@ data_vol="$data_dir:/data:rw"
 
 write_catalog() {
   local extra_hosts_block=""
-  if [[ -z "${DART_VM_MCP_INSTALL_SKIP_DOCKER:-}" ]]; then
+  if [[ -z "${DART_NETWORK_MCP_INSTALL_SKIP_DOCKER:-}" ]]; then
     if ! docker run --rm alpine getent hosts host.docker.internal >/dev/null 2>&1; then
       extra_hosts_block=$'extraHosts: ["host.docker.internal:host-gateway"]\n'
     fi
@@ -85,11 +85,11 @@ write_catalog() {
   fi
 
   cat >"$catalog_file" <<EOF
-name: dart-vm-mcp
+name: dart-network-mcp
 title: Dart VM Network
 description: HTTP profile of running Dart and Flutter VMs.
 type: server
-image: dart-vm-mcp:local
+image: dart-network-mcp:local
 longLived: true
 volumes:
   - $dart_tool_vol
@@ -97,9 +97,9 @@ volumes:
 env:
   - name: HOME
     value: /home/mcp
-  - name: DART_VM_MCP_DATA
+  - name: DART_NETWORK_MCP_DATA
     value: /data
-  - name: DART_VM_MCP_IN_DOCKER
+  - name: DART_NETWORK_MCP_IN_DOCKER
     value: "1"
 ${user_block}${extra_hosts_block}
 EOF
@@ -108,23 +108,23 @@ EOF
 write_catalog
 
 ensure_docker_mcp_profile() {
-  if docker mcp profile show dart-vm-mcp >/dev/null 2>&1; then
-    docker mcp profile server add dart-vm-mcp --server file://dart-vm-mcp.yaml
+  if docker mcp profile show dart-network-mcp >/dev/null 2>&1; then
+    docker mcp profile server add dart-network-mcp --server file://dart-network-mcp.yaml
     return
   fi
-  if docker mcp profile create --name dart-vm-mcp --id dart-vm-mcp --server file://dart-vm-mcp.yaml; then
+  if docker mcp profile create --name dart-network-mcp --id dart-network-mcp --server file://dart-network-mcp.yaml; then
     return
   fi
-  if docker mcp profile show dart-vm-mcp >/dev/null 2>&1; then
-    docker mcp profile server add dart-vm-mcp --server file://dart-vm-mcp.yaml
+  if docker mcp profile show dart-network-mcp >/dev/null 2>&1; then
+    docker mcp profile server add dart-network-mcp --server file://dart-network-mcp.yaml
     return
   fi
-  echo "Failed to create or update docker mcp profile dart-vm-mcp" >&2
+  echo "Failed to create or update docker mcp profile dart-network-mcp" >&2
   exit 1
 }
 
-if [[ -z "${DART_VM_MCP_INSTALL_SKIP_DOCKER:-}" ]]; then
-  docker build -t dart-vm-mcp:local "$SCRIPT_DIR"
+if [[ -z "${DART_NETWORK_MCP_INSTALL_SKIP_DOCKER:-}" ]]; then
+  docker build -t dart-network-mcp:local "$SCRIPT_DIR"
   ensure_docker_mcp_profile
 fi
 
@@ -148,9 +148,9 @@ args = [
     "-e",
     "HOME=/home/mcp",
     "-e",
-    "DART_VM_MCP_DATA=/data",
+    "DART_NETWORK_MCP_DATA=/data",
     "-e",
-    "DART_VM_MCP_IN_DOCKER=1",
+    "DART_NETWORK_MCP_IN_DOCKER=1",
     "-v",
     f"{home}/.dart-tool:/home/mcp/.dart-tool:ro",
     "-v",
@@ -158,7 +158,7 @@ args = [
 ]
 if uid and gid:
     args.extend(["-u", f"{uid}:{gid}"])
-args.append("dart-vm-mcp:local")
+args.append("dart-network-mcp:local")
 print(json.dumps({"command": "docker", "args": args}))
 PY
 }

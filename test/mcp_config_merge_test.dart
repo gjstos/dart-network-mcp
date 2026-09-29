@@ -1,8 +1,8 @@
-import 'package:dart_vm_mcp/src/mcp_config_merge.dart';
+import 'package:dart_network_mcp/src/mcp_config_merge.dart';
 import 'package:test/test.dart';
 
 void main() {
-  test('keeps MCP_DOCKER and adds dart-vm-mcp', () {
+  test('keeps MCP_DOCKER and adds dart-network-mcp', () {
     final merged = mergeMcpServerEntry(
       {
         'mcpServers': {
@@ -14,7 +14,7 @@ void main() {
       },
       {
         'command': 'docker',
-        'args': ['mcp', 'gateway', 'run', '--profile', 'dart-vm-mcp'],
+        'args': ['mcp', 'gateway', 'run', '--profile', 'dart-network-mcp'],
       },
     );
     final servers = merged['mcpServers'] as Map;
@@ -23,8 +23,8 @@ void main() {
       ['mcp', 'gateway', 'run'],
     );
     expect(
-      (servers['dart-vm-mcp'] as Map)['args'],
-      ['mcp', 'gateway', 'run', '--profile', 'dart-vm-mcp'],
+      (servers['dart-network-mcp'] as Map)['args'],
+      ['mcp', 'gateway', 'run', '--profile', 'dart-network-mcp'],
     );
   });
 }

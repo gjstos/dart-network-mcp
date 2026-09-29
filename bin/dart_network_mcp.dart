@@ -2,12 +2,12 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
-import 'package:dart_vm_mcp/src/dart_vm_mcp.dart';
-import 'package:dart_vm_mcp/src/data_dir.dart';
-import 'package:dart_vm_mcp/src/discovery.dart';
-import 'package:dart_vm_mcp/src/session_store.dart';
-import 'package:dart_vm_mcp/src/tool_json.dart';
-import 'package:dart_vm_mcp/src/vm_uri.dart';
+import 'package:dart_network_mcp/src/dart_network_mcp.dart';
+import 'package:dart_network_mcp/src/data_dir.dart';
+import 'package:dart_network_mcp/src/discovery.dart';
+import 'package:dart_network_mcp/src/session_store.dart';
+import 'package:dart_network_mcp/src/tool_json.dart';
+import 'package:dart_network_mcp/src/vm_uri.dart';
 import 'package:dtd/dtd.dart';
 import 'package:mcp_dart/mcp_dart.dart';
 import 'package:path/path.dart' as p;
@@ -48,7 +48,7 @@ Future<void> _ensureDataDirectory(String dataDir) async {
 }
 
 Future<void> _recoverLiveSessions({
-  required DartVmMcp mcp,
+  required DartNetworkMcp mcp,
   required SessionStore store,
   required bool inDocker,
 }) async {
@@ -148,7 +148,7 @@ class _DtdDiscovery {
     required this.dataDirectory,
   });
 
-  final DartVmMcp mcp;
+  final DartNetworkMcp mcp;
   final SessionStore store;
   final bool inDocker;
   final String dataDirectory;
@@ -291,7 +291,7 @@ class _DtdDiscovery {
   }
 }
 
-void _registerTools(McpServer server, DartVmMcp mcp, {required bool inDocker}) {
+void _registerTools(McpServer server, DartNetworkMcp mcp, {required bool inDocker}) {
   server.tool(
     'list_sessions',
     description: 'List VM sessions',
@@ -487,7 +487,7 @@ void _registerTools(McpServer server, DartVmMcp mcp, {required bool inDocker}) {
 
 Future<void> main() async {
   _configureMcpLogging();
-  final inDocker = Platform.environment['DART_VM_MCP_IN_DOCKER'] == '1';
+  final inDocker = Platform.environment['DART_NETWORK_MCP_IN_DOCKER'] == '1';
   final dataDir = resolveDataDirectory(Platform.environment);
   await _ensureDataDirectory(dataDir);
 
@@ -495,11 +495,11 @@ Future<void> main() async {
   final store = SessionStore.open(dbPath);
   _chmodIfUnix(dbPath, '600');
 
-  final mcp = DartVmMcp(store: store, dataDirectory: dataDir);
+  final mcp = DartNetworkMcp(store: store, dataDirectory: dataDir);
   await _recoverLiveSessions(mcp: mcp, store: store, inDocker: inDocker);
 
   final server = McpServer(
-    Implementation(name: 'dart-vm-mcp', version: '0.1.0'),
+    Implementation(name: 'dart-network-mcp', version: '0.1.0'),
     options: ServerOptions(
       capabilities: ServerCapabilities(
         tools: ServerCapabilitiesTools(),

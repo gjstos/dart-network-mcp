@@ -4,14 +4,14 @@
 
 **Goal:** Entregar um servidor MCP em Dart que anexa em N VMs Dart, grava o HTTP profile de cada uma num SQLite separado pela URI da VM, e exporta HAR 1.2 e o JSON offline do DevTools, inclusive depois do crash.
 
-**Architecture:** Um processo long-lived usa `package:vm_service` e `package:dtd`. A chave da sessão é a URI WebSocket canônica. `SessionStore` é o único escritor do SQLite. As tools do `package:mcp_dart` chamam `DartVmMcp`, que não mistura chaves. O container só reescreve host loopback para `host.docker.internal`.
+**Architecture:** Um processo long-lived usa `package:vm_service` e `package:dtd`. A chave da sessão é a URI WebSocket canônica. `SessionStore` é o único escritor do SQLite. As tools do `package:mcp_dart` chamam `DartNetworkMcp`, que não mistura chaves. O container só reescreve host loopback para `host.docker.internal`.
 
 **Tech Stack:** Dart 3.6, `mcp_dart`, `vm_service`, `sqlite3`, `dtd`, `path`, `test`. Imagem `dart:stable`. App exemplo Flutter com `package:http`.
 
 ## Global Constraints
 
 - Não fazer `git add` nem `git commit`. Deixar cada tarefa na working tree.
-- Diretório de dados: `$DART_VM_MCP_DATA` se existir; senão `%LOCALAPPDATA%\dart-vm-mcp` se `LOCALAPPDATA` existir; senão `~/.local/share/dart-vm-mcp`. No container, `DART_VM_MCP_DATA=/data`.
+- Diretório de dados: `$DART_NETWORK_MCP_DATA` se existir; senão `%LOCALAPPDATA%\dart-network-mcp` se `LOCALAPPDATA` existir; senão `~/.local/share/dart-network-mcp`. No container, `DART_NETWORK_MCP_DATA=/data`.
 - Chave `vm_uri`: `http`→`ws`, `https`→`wss`, path termina em `/ws` sem barra final. Host da chave não muda.
 - PK de request: `(vm_uri, request_id, start_time)`.
 - SQLite WAL, `busy_timeout` 5000 ms. Unix: diretório `0700`, arquivo `0600`.
@@ -22,9 +22,9 @@
 - Sessão `history` sem `includeHistory=true` responde `history_requires_flag` sem chave `requests`.
 - `includeHistory=true` em sessão `live` é ignorado.
 - Erros JSON: `vm_not_found`, `request_not_found`, `ambiguous_request`, `attach_failed`, `history_requires_flag`, `http_profile_unavailable`, `sqlite_busy`, `invalid_params`.
-- HAR 1.2 com `creator.name=dart-vm-mcp`. Snapshot DevTools com `devToolsSnapshot=true` e `activeScreenId=network`. Export: 8 hex = SHA-1 de `vmUri`; em history `isFlutterApp=false`.
+- HAR 1.2 com `creator.name=dart-network-mcp`. Snapshot DevTools com `devToolsSnapshot=true` e `activeScreenId=network`. Export: 8 hex = SHA-1 de `vmUri`; em history `isFlutterApp=false`.
 - iOS, Android, desktop e qualquer outra URI de VM seguem o mesmo attach. Loopback no container vira `host.docker.internal` só no socket.
-- Install exige `--claude`, `--cursor` ou os dois. Entrada do cliente se chama `dart-vm-mcp` e não altera `MCP_DOCKER`. Profile `dart-vm-mcp`.
+- Install exige `--claude`, `--cursor` ou os dois. Entrada do cliente se chama `dart-network-mcp` e não altera `MCP_DOCKER`. Profile `dart-network-mcp`.
 - Body das tools: JSON válido sai como valor com `requestBodyEncoding` / `responseBodyEncoding` = `json`. UTF-8 que não é JSON, inclusive body truncado, sai string com `utf8`. O resto é base64. HAR e DevTools não fazem esse decode. O `dart:io` já descomprime gzip.
 - `appName` vem de `package:<nome>/...` no `rootLib`. Sem isso, fica o `name` do isolate.
 - `list_requests` traz método, URI, status, `durationMs` e bodies. `*BodySize` na listagem só se truncado. Headers, isolate, `reasonPhrase` e tamanhos sempre presentes ficam em `get_request`.
@@ -45,9 +45,9 @@
 - `lib/src/devtools_export.dart` — snapshot offline.
 - `lib/src/vm_session.dart` — attach, poll, history.
 - `lib/src/discovery.dart` — URIs de DTD no disco.
-- `lib/src/dart_vm_mcp.dart` — métodos das tools.
+- `lib/src/dart_network_mcp.dart` — métodos das tools.
 - `lib/src/mcp_config_merge.dart` — merge do JSON do cliente.
-- `bin/dart_vm_mcp.dart` — stdio MCP.
+- `bin/dart_network_mcp.dart` — stdio MCP.
 - `test/support/fake_vm_service.dart` — VM Service WebSocket.
 - `Dockerfile` — imagem Linux com `libsqlite3`.
 - `install.sh` — catálogo, profile, Claude e Cursor.
@@ -72,7 +72,7 @@
 `pubspec.yaml`
 
 ```yaml
-name: dart_vm_mcp
+name: dart_network_mcp
 description: MCP server for Dart VM HTTP profiles.
 version: 0.1.0
 publish_to: none
@@ -104,7 +104,7 @@ Expected: resolve sem erro. Se `mcp_dart` ou `dtd` não existirem nessas versõe
 `test/vm_uri_test.dart`
 
 ```dart
-import 'package:dart_vm_mcp/src/vm_uri.dart';
+import 'package:dart_network_mcp/src/vm_uri.dart';
 import 'package:test/test.dart';
 
 void main() {
@@ -203,13 +203,13 @@ Expected: PASS
 `test/data_dir_test.dart`
 
 ```dart
-import 'package:dart_vm_mcp/src/data_dir.dart';
+import 'package:dart_network_mcp/src/data_dir.dart';
 import 'package:test/test.dart';
 
 void main() {
-  test('DART_VM_MCP_DATA wins', () {
+  test('DART_NETWORK_MCP_DATA wins', () {
     expect(
-      resolveDataDirectory({'DART_VM_MCP_DATA': '/data', 'HOME': '/home/a'}),
+      resolveDataDirectory({'DART_NETWORK_MCP_DATA': '/data', 'HOME': '/home/a'}),
       '/data',
     );
   });
@@ -217,14 +217,14 @@ void main() {
   test('LOCALAPPDATA is the windows default', () {
     expect(
       resolveDataDirectory({'LOCALAPPDATA': r'C:\Users\a\AppData\Local'}),
-      r'C:\Users\a\AppData\Local\dart-vm-mcp',
+      r'C:\Users\a\AppData\Local\dart-network-mcp',
     );
   });
 
   test('home fallback is .local/share', () {
     expect(
       resolveDataDirectory({'HOME': '/Users/a'}),
-      '/Users/a/.local/share/dart-vm-mcp',
+      '/Users/a/.local/share/dart-network-mcp',
     );
   });
 }
@@ -243,19 +243,19 @@ Expected: FAIL, biblioteca ausente.
 import 'package:path/path.dart' as p;
 
 String resolveDataDirectory(Map<String, String> env) {
-  final override = env['DART_VM_MCP_DATA'];
+  final override = env['DART_NETWORK_MCP_DATA'];
   if (override != null && override.isNotEmpty) {
     return override;
   }
   final localAppData = env['LOCALAPPDATA'];
   if (localAppData != null && localAppData.isNotEmpty) {
-    return p.join(localAppData, 'dart-vm-mcp');
+    return p.join(localAppData, 'dart-network-mcp');
   }
   final home = env['HOME'] ?? env['USERPROFILE'];
   if (home == null || home.isEmpty) {
     throw StateError('HOME or USERPROFILE is required');
   }
-  return p.join(home, '.local', 'share', 'dart-vm-mcp');
+  return p.join(home, '.local', 'share', 'dart-network-mcp');
 }
 ```
 
@@ -286,7 +286,7 @@ Expected: PASS
 
 - [x] **Step 1: Teste que falha**
 
-`test/session_store_test.dart` usa `Directory.systemTemp.createTempSync('dart-vm-mcp')`. Cobre:
+`test/session_store_test.dart` usa `Directory.systemTemp.createTempSync('dart-network-mcp')`. Cobre:
 
 - duas `vmUri` não devolvem a request uma da outra em `listRequests`
 - `upsertRequest` duas vezes com o mesmo `startTime` mantém uma linha e atualiza `statusCode`
@@ -330,7 +330,7 @@ Expected: PASS
 `test/tool_json_test.dart`
 
 ```dart
-import 'package:dart_vm_mcp/src/tool_json.dart';
+import 'package:dart_network_mcp/src/tool_json.dart';
 import 'package:test/test.dart';
 
 void main() {
@@ -373,7 +373,7 @@ Construa um `RequestRecord` `GET` `https://example.com/a?q=1`, `startTime` `1710
 Expect:
 
 - `log.version` == `1.2`
-- `log.creator.name` == `dart-vm-mcp`
+- `log.creator.name` == `dart-network-mcp`
 - `log.creator.version` == a versão passada
 - entry `time` == `500`
 - `request.httpVersion` == `HTTP/1.1`
@@ -410,7 +410,7 @@ Expected: PASS
 
 - [x] **Step 1: Teste que falha**
 
-Expect `devToolsSnapshot` true, `devToolsVersion` `dart-vm-mcp/0.1.0` quando version é `0.1.0`, `activeScreenId` `network`, `connectedApp.isRunningOnDartVM` true, `connectedApp.isFlutterApp` igual ao argumento, `connectedApp.isProfileBuild` false, `connectedApp.isDartWebApp` false.
+Expect `devToolsSnapshot` true, `devToolsVersion` `dart-network-mcp/0.1.0` quando version é `0.1.0`, `activeScreenId` `network`, `connectedApp.isRunningOnDartVM` true, `connectedApp.isFlutterApp` igual ao argumento, `connectedApp.isProfileBuild` false, `connectedApp.isDartWebApp` false.
 
 `network.socketData` e `network.webSocketData` são listas vazias. `network.selectedRequestId` é null. `network.timelineMicrosOffset` é 0.
 
@@ -435,7 +435,7 @@ Map<String, Object?> buildDevToolsSnapshot(
 }) {
   return {
     'devToolsSnapshot': true,
-    'devToolsVersion': 'dart-vm-mcp/$version',
+    'devToolsVersion': 'dart-network-mcp/$version',
     'activeScreenId': 'network',
     'connectedApp': {
       'isFlutterApp': isFlutterApp,
@@ -550,7 +550,7 @@ Expected: PASS
 ```dart
 import 'dart:io';
 
-import 'package:dart_vm_mcp/src/discovery.dart';
+import 'package:dart_network_mcp/src/discovery.dart';
 import 'package:test/test.dart';
 
 void main() {
@@ -589,21 +589,21 @@ Só arquivos do diretório, sem recursão. O nome contém `dtd` ou `tooling-daem
 Run: `dart test test/discovery_test.dart`
 Expected: PASS
 
-### Task 9: DartVmMcp
+### Task 9: DartNetworkMcp
 
 **Files:**
-- Create: `lib/src/dart_vm_mcp.dart`
-- Test: `test/dart_vm_mcp_test.dart`
+- Create: `lib/src/dart_network_mcp.dart`
+- Test: `test/dart_network_mcp_test.dart`
 
 **Interfaces:**
 - Consumes: `SessionStore`, `VmSession`, `buildHar`, `buildDevToolsSnapshot`, `canonicalizeVmUri`, `socketUriFor`, `toolError`.
-- Produces: `DartVmMcp` com `listSessions`, `getSession`, `attachVm`, `listRequests`, `getRequest`, `exportHar`, `exportDevToolsJson`, `deleteSession`. Cada método devolve `Map<String, Object?>`.
+- Produces: `DartNetworkMcp` com `listSessions`, `getSession`, `attachVm`, `listRequests`, `getRequest`, `exportHar`, `exportDevToolsJson`, `deleteSession`. Cada método devolve `Map<String, Object?>`.
 
 `attachVm(String uri, {required bool inDocker})` grava a chave canônica e conecta em `socketUriFor`. Sessão `live` já existente devolve a sessão sem segundo socket. Sessão `history` cujo socket volta conecta e passa a `live` sem apagar linhas. Falha de conexão devolve `attach_failed` e não cria linha.
 
 `limit` acima de 200 vira 200. Abaixo de 1 vira 1. Default 50. `offset` default 0.
 
-Export grava `<dataDir>/exports/dart_vm_mcp_<yyyyMMddTHHmmss>_<8 hex sha1 da vmUri>.har` ou `.json`. Resposta: `path`, `requestCount`, `bytes`, `vmUri`, `state`. Zero requests ainda grava o arquivo válido.
+Export grava `<dataDir>/exports/dart_network_mcp_<yyyyMMddTHHmmss>_<8 hex sha1 da vmUri>.har` ou `.json`. Resposta: `path`, `requestCount`, `bytes`, `vmUri`, `state`. Zero requests ainda grava o arquivo válido.
 
 `getRequest` sem `startTime` e com mais de uma linha devolve `ambiguous_request` com `error.startTimes` e sem bodies.
 
@@ -617,7 +617,7 @@ Use a fake da Task 7 e um store temporário. Afirme `history_requires_flag` sem 
 
 - [x] **Step 2: Rodar e ver falhar**
 
-Run: `dart test test/dart_vm_mcp_test.dart`
+Run: `dart test test/dart_network_mcp_test.dart`
 Expected: FAIL
 
 - [x] **Step 3: Implementar**
@@ -626,23 +626,23 @@ JSON válido vira valor com `requestBodyEncoding` / `responseBodyEncoding` = `js
 
 - [x] **Step 4: Rodar e ver passar**
 
-Run: `dart test test/dart_vm_mcp_test.dart`
+Run: `dart test test/dart_network_mcp_test.dart`
 Expected: PASS
 
 ### Task 10: Entrypoint stdio
 
 **Files:**
-- Create: `bin/dart_vm_mcp.dart`
+- Create: `bin/dart_network_mcp.dart`
 
 **Interfaces:**
-- Consumes: `DartVmMcp`, `discoverDtdUris`, `resolveDataDirectory`, `McpServer` e `StdioServerTransport` de `package:mcp_dart`.
+- Consumes: `DartNetworkMcp`, `discoverDtdUris`, `resolveDataDirectory`, `McpServer` e `StdioServerTransport` de `package:mcp_dart`.
 - Produces: as oito tools `list_sessions`, `get_session`, `attach_vm`, `list_requests`, `get_request`, `export_har`, `export_devtools_json`, `delete_session`.
 
 - [x] **Step 1: Registrar as tools**
 
 Stdout fica só com o protocolo. Diagnóstico vai para `stderr`. Cada callback faz `jsonEncode` do mapa. Mapa com chave `error` usa `CallToolResult.isError: true`.
 
-`inDocker` é `Platform.environment['DART_VM_MCP_IN_DOCKER'] == '1'`. Crie o diretório de dados. No Unix, modo `0700` no diretório e `0600` no sqlite.
+`inDocker` é `Platform.environment['DART_NETWORK_MCP_IN_DOCKER'] == '1'`. Crie o diretório de dados. No Unix, modo `0700` no diretório e `0600` no sqlite.
 
 Na subida, toda sessão `live` cujo socket falha recebe `markHistory(vmUri, 'process_restart', now)`.
 
@@ -680,20 +680,20 @@ RUN dart pub get
 COPY bin bin
 COPY lib lib
 COPY tool/docker_entrypoint.sh /usr/local/bin/docker_entrypoint.sh
-RUN dart compile exe bin/dart_vm_mcp.dart -o /usr/local/bin/dart_vm_mcp \
+RUN dart compile exe bin/dart_network_mcp.dart -o /usr/local/bin/dart_network_mcp \
   && chmod 755 /usr/local/bin/docker_entrypoint.sh
 ENV HOME=/home/mcp
-ENV DART_VM_MCP_DATA=/data
-ENV DART_VM_MCP_IN_DOCKER=1
+ENV DART_NETWORK_MCP_DATA=/data
+ENV DART_NETWORK_MCP_IN_DOCKER=1
 ENTRYPOINT ["/usr/local/bin/docker_entrypoint.sh"]
 ```
 
-O entrypoint força `HOME=/home/mcp`, `DART_VM_MCP_DATA=/data` e `DART_VM_MCP_IN_DOCKER=1`. O Docker MCP Toolkit passa `-e HOME` etc. como pass-through do processo do gateway; sem isso o container herda `HOME` do host e cai com `PathAccessException` em `/Users/...`.
+O entrypoint força `HOME=/home/mcp`, `DART_NETWORK_MCP_DATA=/data` e `DART_NETWORK_MCP_IN_DOCKER=1`. O Docker MCP Toolkit passa `-e HOME` etc. como pass-through do processo do gateway; sem isso o container herda `HOME` do host e cai com `PathAccessException` em `/Users/...`.
 
 - [x] **Step 2: Build**
 
-Run: `docker build -t dart-vm-mcp:local .`
-Expected: `docker image inspect dart-vm-mcp:local` sai 0.
+Run: `docker build -t dart-network-mcp:local .`
+Expected: `docker image inspect dart-network-mcp:local` sai 0.
 
 ### Task 12: Install
 
@@ -705,16 +705,16 @@ Expected: `docker image inspect dart-vm-mcp:local` sai 0.
 
 **Interfaces:**
 - Consumes: nada do store.
-- Produces: `Map<String, Object?> mergeMcpServerEntry(Map<String, Object?> config, Map<String, Object?> entry)`. Substitui só `mcpServers.dart-vm-mcp`. `MCP_DOCKER` permanece.
+- Produces: `Map<String, Object?> mergeMcpServerEntry(Map<String, Object?> config, Map<String, Object?> entry)`. Substitui só `mcpServers.dart-network-mcp`. `MCP_DOCKER` permanece.
 
 - [x] **Step 1: Teste do merge**
 
 ```dart
-import 'package:dart_vm_mcp/src/mcp_config_merge.dart';
+import 'package:dart_network_mcp/src/mcp_config_merge.dart';
 import 'package:test/test.dart';
 
 void main() {
-  test('keeps MCP_DOCKER and adds dart-vm-mcp', () {
+  test('keeps MCP_DOCKER and adds dart-network-mcp', () {
     final merged = mergeMcpServerEntry(
       {
         'mcpServers': {
@@ -726,7 +726,7 @@ void main() {
       },
       {
         'command': 'docker',
-        'args': ['mcp', 'gateway', 'run', '--profile', 'dart-vm-mcp'],
+        'args': ['mcp', 'gateway', 'run', '--profile', 'dart-network-mcp'],
       },
     );
     final servers = merged['mcpServers'] as Map;
@@ -735,8 +735,8 @@ void main() {
       ['mcp', 'gateway', 'run'],
     );
     expect(
-      (servers['dart-vm-mcp'] as Map)['args'],
-      ['mcp', 'gateway', 'run', '--profile', 'dart-vm-mcp'],
+      (servers['dart-network-mcp'] as Map)['args'],
+      ['mcp', 'gateway', 'run', '--profile', 'dart-network-mcp'],
     );
   });
 }
@@ -753,28 +753,28 @@ Expected: PASS
 
 O script exige `--claude`, `--cursor` ou os dois. Flag desconhecida sai 2. Home é `$HOME` ou `$USERPROFILE`. Data dir segue `resolveDataDirectory`. Cria o data dir, `<home>/.dart-tool` e `<home>/.docker/mcp/catalogs`. Unix: `chmod 700` no data dir. Windows (`MINGW*`, `MSYS*`, `CYGWIN*`): `icacls` só para `$USERNAME`. Separador de allowlist: `;` no Windows e `:` nos outros.
 
-Sem `DART_VM_MCP_INSTALL_SKIP_DOCKER=1`, faz `docker build -t dart-vm-mcp:local`. Escreve `<home>/.docker/mcp/catalogs/dart-vm-mcp.yaml` com `longLived: true`, imagem `dart-vm-mcp:local`, volumes `<home>/.dart-tool:/home/mcp/.dart-tool:ro` e `<data dir>:/data:rw`, env `HOME=/home/mcp`, `DART_VM_MCP_DATA=/data`, `DART_VM_MCP_IN_DOCKER=1`. Unix inclui `user: "<uid>:<gid>"`. Windows omite `user`. Se `docker run --rm alpine getent hosts host.docker.internal` falhar, inclui `extraHosts: ["host.docker.internal:host-gateway"]`. O skip não inclui `extraHosts` e não chama `docker mcp`.
+Sem `DART_NETWORK_MCP_INSTALL_SKIP_DOCKER=1`, faz `docker build -t dart-network-mcp:local`. Escreve `<home>/.docker/mcp/catalogs/dart-network-mcp.yaml` com `longLived: true`, imagem `dart-network-mcp:local`, volumes `<home>/.dart-tool:/home/mcp/.dart-tool:ro` e `<data dir>:/data:rw`, env `HOME=/home/mcp`, `DART_NETWORK_MCP_DATA=/data`, `DART_NETWORK_MCP_IN_DOCKER=1`. Unix inclui `user: "<uid>:<gid>"`. Windows omite `user`. Se `docker run --rm alpine getent hosts host.docker.internal` falhar, inclui `extraHosts: ["host.docker.internal:host-gateway"]`. O skip não inclui `extraHosts` e não chama `docker mcp`.
 
-Sem o skip: cria o profile `dart-vm-mcp` se faltar e adiciona `file://dart-vm-mcp.yaml`.
+Sem o skip: cria o profile `dart-network-mcp` se faltar e adiciona `file://dart-network-mcp.yaml`.
 
-A entry do cliente é `docker` / `mcp gateway run --profile dart-vm-mcp`, com `MCP_GATEWAY_DOCKER_BIND_ALLOWED_PATHS` em `<home>/.dart-tool` e `MCP_GATEWAY_DOCKER_BIND_ALLOW_WRITABLE_PATHS` no data dir. `--claude` faz merge em `<home>/.claude.json`. `--cursor` em `<home>/.cursor/mcp.json`.
+A entry do cliente é `docker` / `mcp gateway run --profile dart-network-mcp`, com `MCP_GATEWAY_DOCKER_BIND_ALLOWED_PATHS` em `<home>/.dart-tool` e `MCP_GATEWAY_DOCKER_BIND_ALLOW_WRITABLE_PATHS` no data dir. `--claude` faz merge em `<home>/.claude.json`. `--cursor` em `<home>/.cursor/mcp.json`.
 
 - [x] **Step 4: HOME temporário**
 
 ```bash
 tmp="$(mktemp -d)"
 export HOME="$tmp"
-export DART_VM_MCP_INSTALL_SKIP_DOCKER=1
+export DART_NETWORK_MCP_INSTALL_SKIP_DOCKER=1
 bash install.sh --claude --cursor
-test -f "$tmp/.docker/mcp/catalogs/dart-vm-mcp.yaml"
-grep -q 'longLived: true' "$tmp/.docker/mcp/catalogs/dart-vm-mcp.yaml"
+test -f "$tmp/.docker/mcp/catalogs/dart-network-mcp.yaml"
+grep -q 'longLived: true' "$tmp/.docker/mcp/catalogs/dart-network-mcp.yaml"
 python3 - <<'PY'
 import json, os
 home = os.environ["HOME"]
 claude = json.load(open(home + "/.claude.json"))
 cursor = json.load(open(home + "/.cursor/mcp.json"))
-assert claude["mcpServers"]["dart-vm-mcp"]["args"][-1] == "dart-vm-mcp"
-assert cursor["mcpServers"]["dart-vm-mcp"]["args"][-1] == "dart-vm-mcp"
+assert claude["mcpServers"]["dart-network-mcp"]["args"][-1] == "dart-network-mcp"
+assert cursor["mcpServers"]["dart-network-mcp"]["args"][-1] == "dart-network-mcp"
 json.dump({"mcpServers": {"MCP_DOCKER": {"command": "docker", "args": ["mcp", "gateway", "run"]}}}, open(home + "/.claude.json", "w"))
 PY
 bash install.sh --claude
@@ -782,7 +782,7 @@ python3 - <<'PY'
 import json, os
 claude = json.load(open(os.environ["HOME"] + "/.claude.json"))
 assert claude["mcpServers"]["MCP_DOCKER"]["args"] == ["mcp", "gateway", "run"]
-assert "dart-vm-mcp" in claude["mcpServers"]
+assert "dart-network-mcp" in claude["mcpServers"]
 PY
 ```
 
@@ -796,7 +796,7 @@ Expected: exit 0.
 - [x] **Step 1: Criar**
 
 ```bash
-flutter create --project-name dart_vm_mcp_example --platforms=ios,android,macos,linux,windows example
+flutter create --project-name dart_network_mcp_example --platforms=ios,android,macos,linux,windows example
 ```
 
 Run em `example`: `flutter pub add http`
@@ -823,7 +823,7 @@ Expected: nenhum erro. O working directory do analyze é `example` se o `pubspec
 1. O que é: attach em VMs Dart já em execução e o HTTP profile, uma chave por URI.
 2. Alvos: iOS, Android e desktop usam o mesmo attach. A URI impressa pelo tooling é a chave. VM sem profiler `dart:io` fica `live` e as tools de tráfego devolvem `http_profile_unavailable`.
 3. Dados sensíveis: SQLite e exports contêm headers e bodies, inclusive `Authorization` e cookies. O arquivo fica restrito ao usuário.
-4. Install: `bash install.sh --claude`, `--cursor` ou os dois. Profile `dart-vm-mcp`. Não remove outro MCP.
+4. Install: `bash install.sh --claude`, `--cursor` ou os dois. Profile `dart-network-mcp`. Não remove outro MCP.
 5. Tabela das oito tools (overview) + link para `docs/mcp.md`.
 6. Live e history: default só live. History é o log de antes do crash. Sem a flag a tool recusa.
 7. Exemplo: `cd example && flutter run -d <id>` com um id de `flutter devices`. As três URLs e o intervalo de 5 segundos.
@@ -834,7 +834,7 @@ Expected: nenhum erro. O working directory do analyze é `example` se o `pubspec
 
 Preferir servidor MCP long-lived (stdio `docker run -i` ou gateway estável). One-shot `docker mcp tools call` não observa bem o poll de 1s.
 
-- [x] **Step 1:** `bash install.sh --claude --cursor`. A imagem `dart-vm-mcp:local` e o profile `dart-vm-mcp` existem.
+- [x] **Step 1:** `bash install.sh --claude --cursor`. A imagem `dart-network-mcp:local` e o profile `dart-network-mcp` existem.
 - [x] **Step 2:** Subir `example/` em debug num device de `list_devices` que não seja web. Ler a URI da VM no log.
 - [x] **Step 3:** `attach_vm` dessa URI no servidor do profile. `list_requests` mostra os três GETs de abertura (`/posts/1`, `/users/1`, `/albums/1`), com `responseBody` JSON.
 - [x] **Step 4:** Após um ciclo de 5 segundos, o lote seguinte (POST/PUT/PATCH ou DELETE e GETs) aparece na mesma chave.

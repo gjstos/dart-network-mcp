@@ -12,9 +12,9 @@ RUN dart pub get
 COPY bin bin
 COPY lib lib
 COPY tool/docker_entrypoint.sh /usr/local/bin/docker_entrypoint.sh
-RUN dart compile exe bin/dart_vm_mcp.dart -o /usr/local/bin/dart_vm_mcp \
+RUN dart compile exe bin/dart_network_mcp.dart -o /usr/local/bin/dart_network_mcp \
   && chmod 755 /usr/local/bin/docker_entrypoint.sh
 ENV HOME=/home/mcp
-ENV DART_VM_MCP_DATA=/data
-ENV DART_VM_MCP_IN_DOCKER=1
+ENV DART_NETWORK_MCP_DATA=/data
+ENV DART_NETWORK_MCP_IN_DOCKER=1
 ENTRYPOINT ["/usr/local/bin/docker_entrypoint.sh"]

@@ -1,8 +1,8 @@
 import 'dart:convert';
 import 'dart:typed_data';
 
-import 'package:dart_vm_mcp/src/devtools_export.dart';
-import 'package:dart_vm_mcp/src/session_store.dart';
+import 'package:dart_network_mcp/src/devtools_export.dart';
+import 'package:dart_network_mcp/src/session_store.dart';
 import 'package:test/test.dart';
 
 void main() {
@@ -43,7 +43,7 @@ void main() {
       );
 
       expect(snapshot['devToolsSnapshot'], isTrue);
-      expect(snapshot['devToolsVersion'], 'dart-vm-mcp/$version');
+      expect(snapshot['devToolsVersion'], 'dart-network-mcp/$version');
       expect(snapshot['activeScreenId'], 'network');
       expect(
         snapshot.keys.toSet(),

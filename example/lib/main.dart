@@ -59,7 +59,7 @@ const _writes = [
   _Call(
     'POST',
     '$_host/posts',
-    '{"title":"dart-vm-mcp","body":"batch","userId":1}',
+    '{"title":"dart-network-mcp","body":"batch","userId":1}',
   ),
   _Call(
     'PUT',

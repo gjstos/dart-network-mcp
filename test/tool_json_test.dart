@@ -1,4 +1,4 @@
-import 'package:dart_vm_mcp/src/tool_json.dart';
+import 'package:dart_network_mcp/src/tool_json.dart';
 import 'package:test/test.dart';
 
 void main() {

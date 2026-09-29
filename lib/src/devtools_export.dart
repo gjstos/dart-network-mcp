@@ -9,7 +9,7 @@ Map<String, Object?> buildDevToolsSnapshot(
 }) {
   return {
     'devToolsSnapshot': true,
-    'devToolsVersion': 'dart-vm-mcp/$version',
+    'devToolsVersion': 'dart-network-mcp/$version',
     'activeScreenId': 'network',
     'connectedApp': {
       'isFlutterApp': isFlutterApp,

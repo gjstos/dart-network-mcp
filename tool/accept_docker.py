@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Task 15 acceptance against dart-vm-mcp Docker image (stdio MCP)."""
+"""Task 15 acceptance against dart-network-mcp Docker image (stdio MCP)."""
 from __future__ import annotations
 
 import json
@@ -14,7 +14,7 @@ ROOT = Path(__file__).resolve().parents[1]
 EXAMPLE = ROOT / "example"
 DEVICE = "6524F3A2-8C20-47AB-9CA3-2C4C09145811"
 HOME = os.path.expanduser("~")
-DATA = f"{HOME}/.local/share/dart-vm-mcp"
+DATA = f"{HOME}/.local/share/dart-network-mcp"
 VM_RE = re.compile(r"A Dart VM Service on .+ is available at: (http://\S+)")
 
 
@@ -31,16 +31,16 @@ class McpDocker:
                 "-e",
                 "HOME=/home/mcp",
                 "-e",
-                "DART_VM_MCP_DATA=/data",
+                "DART_NETWORK_MCP_DATA=/data",
                 "-e",
-                "DART_VM_MCP_IN_DOCKER=1",
+                "DART_NETWORK_MCP_IN_DOCKER=1",
                 "-v",
                 f"{HOME}/.dart-tool:/home/mcp/.dart-tool:ro",
                 "-v",
                 f"{DATA}:/data:rw",
                 "-u",
                 f"{os.getuid()}:{os.getgid()}",
-                "dart-vm-mcp:local",
+                "dart-network-mcp:local",
             ],
             stdin=subprocess.PIPE,
             stdout=subprocess.PIPE,

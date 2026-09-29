@@ -1,7 +1,7 @@
 import 'dart:convert';
 import 'dart:io';
 
-import 'package:dart_vm_mcp/src/mcp_config_merge.dart';
+import 'package:dart_network_mcp/src/mcp_config_merge.dart';
 
 void main(List<String> args) {
   if (args.length != 2) {

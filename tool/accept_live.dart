@@ -2,8 +2,8 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
-import 'package:dart_vm_mcp/src/dart_vm_mcp.dart';
-import 'package:dart_vm_mcp/src/session_store.dart';
+import 'package:dart_network_mcp/src/dart_network_mcp.dart';
+import 'package:dart_network_mcp/src/session_store.dart';
 
 /// Long-lived Task 15 acceptance driver (native, not Docker).
 Future<void> main(List<String> args) async {
@@ -12,10 +12,10 @@ Future<void> main(List<String> args) async {
     exit(2);
   }
   final vmUri = args.first;
-  final dataDir = Directory.systemTemp.createTempSync('dart_vm_mcp_accept_').path;
+  final dataDir = Directory.systemTemp.createTempSync('dart_network_mcp_accept_').path;
   stdout.writeln('DATA_DIR=$dataDir');
   final store = SessionStore.open('$dataDir/network.sqlite');
-  final mcp = DartVmMcp(store: store, dataDirectory: dataDir);
+  final mcp = DartNetworkMcp(store: store, dataDirectory: dataDir);
 
   Future<void> dump(String label, Map<String, Object?> map) async {
     stdout.writeln('=== $label ===');

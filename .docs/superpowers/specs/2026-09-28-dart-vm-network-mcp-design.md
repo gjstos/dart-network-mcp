@@ -14,13 +14,13 @@ A v1 não expõe eval, heap, timeline, inspector, logging, socket profile nem We
 
 ## Arquitetura
 
-Um processo Dart, imagem `dart-vm-mcp:local`, sobe pelo Docker MCP Toolkit com `longLived: true`. O processo guarda N sessões. A biblioteca de protocolo é `package:vm_service`. A descoberta usa `package:dtd`. O log fica em SQLite (`package:sqlite3`), modo WAL, no host.
+Um processo Dart, imagem `dart-network-mcp:local`, sobe pelo Docker MCP Toolkit com `longLived: true`. O processo guarda N sessões. A biblioteca de protocolo é `package:vm_service`. A descoberta usa `package:dtd`. O log fica em SQLite (`package:sqlite3`), modo WAL, no host.
 
 A URI que o tooling imprime no console é a identidade da sessão. Simulador iOS, aparelho iOS, emulador Android, aparelho Android e desktop produzem essa URI. O servidor não ramifica por sistema operacional do app nem do host.
 
 ## Sessão e armazenamento
 
-Diretório de dados: `$DART_VM_MCP_DATA` quando essa variável existe. Sem ela, `%LOCALAPPDATA%\dart-vm-mcp` quando `LOCALAPPDATA` existe, e `~/.local/share/dart-vm-mcp` nos outros hosts. No container, `DART_VM_MCP_DATA=/data`. O SQLite é `network.sqlite` nesse diretório. O subdiretório `exports/` fica no mesmo lugar. No Unix o diretório fica `0700` e o arquivo `0600`. No Windows o install restringe o ACL do diretório ao usuário atual.
+Diretório de dados: `$DART_NETWORK_MCP_DATA` quando essa variável existe. Sem ela, `%LOCALAPPDATA%\dart-network-mcp` quando `LOCALAPPDATA` existe, e `~/.local/share/dart-network-mcp` nos outros hosts. No container, `DART_NETWORK_MCP_DATA=/data`. O SQLite é `network.sqlite` nesse diretório. O subdiretório `exports/` fica no mesmo lugar. No Unix o diretório fica `0700` e o arquivo `0600`. No Windows o install restringe o ACL do diretório ao usuário atual.
 
 ### Chave
 
@@ -36,7 +36,7 @@ Algoritmo:
 
 `http://127.0.0.1:62080/06-FZCo24xM=/` e `ws://127.0.0.1:62080/06-FZCo24xM=/ws` são a mesma chave. Cada `flutter run` gera porta e token novos, portanto outra chave. Reconnect na mesma URI reabre a mesma linha e continua o log.
 
-Dentro do container (`DART_VM_MCP_IN_DOCKER=1`), host loopback na URI (`127.0.0.1`, `localhost`, `::1`) vira `host.docker.internal` só no socket, com a mesma porta, path e esquema. Qualquer outro host, inclusive IP de aparelho na rede, é discado como está na chave. Fora do container, conecta na URI canônica. O install garante que `host.docker.internal` resolva dentro do container: no Docker Desktop isso já ocorre. No Docker Engine em que o nome não resolve, a entrada do servidor leva `extraHosts: ["host.docker.internal:host-gateway"]`.
+Dentro do container (`DART_NETWORK_MCP_IN_DOCKER=1`), host loopback na URI (`127.0.0.1`, `localhost`, `::1`) vira `host.docker.internal` só no socket, com a mesma porta, path e esquema. Qualquer outro host, inclusive IP de aparelho na rede, é discado como está na chave. Fora do container, conecta na URI canônica. O install garante que `host.docker.internal` resolva dentro do container: no Docker Desktop isso já ocorre. No Docker Engine em que o nome não resolve, a entrada do servidor leva `extraHosts: ["host.docker.internal:host-gateway"]`.
 
 ### Tabelas
 
@@ -141,7 +141,7 @@ HAR e o JSON do DevTools não aplicam esse decode. Lá o body continua texto UTF
 
 ### HAR
 
-Arquivo em `<diretório de dados>/exports/`, nome `dart_vm_mcp_<yyyyMMddTHHmmss>_<8 hex SHA-1 de vmUri>.har`. Timestamp wall-clock local. O JSON usa o mesmo padrão com extensão `.json`.
+Arquivo em `<diretório de dados>/exports/`, nome `dart_network_mcp_<yyyyMMddTHHmmss>_<8 hex SHA-1 de vmUri>.har`. Timestamp wall-clock local. O JSON usa o mesmo padrão com extensão `.json`.
 
 Documento HAR 1.2:
 
@@ -149,7 +149,7 @@ Documento HAR 1.2:
 {
   "log": {
     "version": "1.2",
-    "creator": { "name": "dart-vm-mcp", "version": "<versão do pacote>" },
+    "creator": { "name": "dart-network-mcp", "version": "<versão do pacote>" },
     "entries": []
   }
 }
@@ -177,7 +177,7 @@ Arquivo no mesmo diretório, extensão `.json`. O documento é um snapshot que o
 ```json
 {
   "devToolsSnapshot": true,
-  "devToolsVersion": "dart-vm-mcp/<versão do pacote>",
+  "devToolsVersion": "dart-network-mcp/<versão do pacote>",
   "activeScreenId": "network",
   "connectedApp": {
     "isFlutterApp": false,
@@ -209,22 +209,22 @@ Profiler indisponível não aparece como lista vazia. A tool de tráfego respond
 
 ## Docker e instalação
 
-Entrada de catálogo: `~/.docker/mcp/catalogs/dart-vm-mcp.yaml`.
+Entrada de catálogo: `~/.docker/mcp/catalogs/dart-network-mcp.yaml`.
 
-Campos fixos da entrada: `name=dart-vm-mcp`, `type=server`, `longLived=true`, `image=dart-vm-mcp:local`. Em host Unix, `user` é `<uid>:<gid>` de quem rodou o install. Em Windows o campo `user` fica de fora. A imagem cria `/home/mcp` antes do mount. Sem `allowHosts` e sem `disableNetwork`. A porta da VM é efêmera.
+Campos fixos da entrada: `name=dart-network-mcp`, `type=server`, `longLived=true`, `image=dart-network-mcp:local`. Em host Unix, `user` é `<uid>:<gid>` de quem rodou o install. Em Windows o campo `user` fica de fora. A imagem cria `/home/mcp` antes do mount. Sem `allowHosts` e sem `disableNetwork`. A porta da VM é efêmera.
 
 O install resolve o home do usuário (`HOME` ou `USERPROFILE`) e grava paths absolutos. Volumes:
 
 - `<home>/.dart-tool:/home/mcp/.dart-tool:ro`
 - `<diretório de dados do host>:/data:rw`
 
-Variáveis do container: `HOME=/home/mcp`, `DART_VM_MCP_DATA=/data`, `DART_VM_MCP_IN_DOCKER=1`. O processo lê o SQLite e os exports em `/data`. A descoberta lê `/home/mcp/.dart-tool`, que é o `~/.dart-tool` do host. O separador das allowlists de bind é o do sistema em que o install roda (`:` ou `;`).
+Variáveis do container: `HOME=/home/mcp`, `DART_NETWORK_MCP_DATA=/data`, `DART_NETWORK_MCP_IN_DOCKER=1`. O processo lê o SQLite e os exports em `/data`. A descoberta lê `/home/mcp/.dart-tool`, que é o `~/.dart-tool` do host. O separador das allowlists de bind é o do sistema em que o install roda (`:` ou `;`).
 
-O install cria o profile `dart-vm-mcp` se ele não existir e adiciona só este servidor, por referência `file://` ao YAML do catálogo. Não remove outros profiles nem outros servidores.
+O install cria o profile `dart-network-mcp` se ele não existir e adiciona só este servidor, por referência `file://` ao YAML do catálogo. Não remove outros profiles nem outros servidores.
 
 `install.sh` exige ao menos uma flag. `--claude` e `--cursor` podem ir juntas. Rodar de novo só garante imagem, YAML, profile e a entrada do cliente.
 
-A entrada do cliente se chama `dart-vm-mcp` e não altera uma entrada `MCP_DOCKER` já existente.
+A entrada do cliente se chama `dart-network-mcp` e não altera uma entrada `MCP_DOCKER` já existente.
 
 ```json
 {
@@ -233,17 +233,17 @@ A entrada do cliente se chama `dart-vm-mcp` e não altera uma entrada `MCP_DOCKE
     "run", "-i", "--rm",
     "--add-host=host.docker.internal:host-gateway",
     "-e", "HOME=/home/mcp",
-    "-e", "DART_VM_MCP_DATA=/data",
-    "-e", "DART_VM_MCP_IN_DOCKER=1",
+    "-e", "DART_NETWORK_MCP_DATA=/data",
+    "-e", "DART_NETWORK_MCP_IN_DOCKER=1",
     "-v", "<home>/.dart-tool:/home/mcp/.dart-tool:ro",
     "-v", "<diretório de dados>:/data:rw",
     "-u", "<uid>:<gid>",
-    "dart-vm-mcp:local"
+    "dart-network-mcp:local"
   ]
 }
 ```
 
-Entrada via `docker run` stdio (não `docker mcp gateway`): o gateway do Toolkit no Docker Desktop falha ao usar `unix:///var/run/docker.sock` quando o socket real está em `~/.docker/run/docker.sock`, e também passa `-e HOME` do host para o container. A imagem usa `tool/docker_entrypoint.sh` para forçar `HOME=/home/mcp`, `DART_VM_MCP_DATA=/data` e `DART_VM_MCP_IN_DOCKER=1`.
+Entrada via `docker run` stdio (não `docker mcp gateway`): o gateway do Toolkit no Docker Desktop falha ao usar `unix:///var/run/docker.sock` quando o socket real está em `~/.docker/run/docker.sock`, e também passa `-e HOME` do host para o container. A imagem usa `tool/docker_entrypoint.sh` para forçar `HOME=/home/mcp`, `DART_NETWORK_MCP_DATA=/data` e `DART_NETWORK_MCP_IN_DOCKER=1`.
 
 `--claude` grava em `mcpServers` de `<home>/.claude.json`. `--cursor` grava em `mcpServers` de `<home>/.cursor/mcp.json`. No Windows `<home>` é `USERPROFILE`. As duas configurações coexistem. O mesmo install vale em macOS, Windows e Linux.
 
@@ -281,7 +281,7 @@ O script de install, com `HOME` temporário, cria o profile, o YAML e as duas en
 
 ### Aceitação ao vivo
 
-Esta passagem usa o app exemplo de verdade e o servidor dentro do Docker, no profile `dart-vm-mcp`. O MCP de Dart/Flutter só controla o app: `launch_app`, logs, `hot_reload`, `hot_restart` e `stop_app`.
+Esta passagem usa o app exemplo de verdade e o servidor dentro do Docker, no profile `dart-network-mcp`. O MCP de Dart/Flutter só controla o app: `launch_app`, logs, `hot_reload`, `hot_restart` e `stop_app`.
 
 1. Subir `example/` em debug num device disponível em `list_devices` (iOS, Android ou desktop) e ler a URI da VM no log. Os passos seguintes não mudam conforme o device.
 2. Attach por essa URI no servidor dockerizado.
@@ -296,4 +296,4 @@ Falha em qualquer passo desta lista é falha da v1.
 
 ## Critério de pronto
 
-A v1 está pronta quando os testes de caixa-preta passam e a aceitação ao vivo passa contra o container do profile `dart-vm-mcp`.
+A v1 está pronta quando os testes de caixa-preta passam e a aceitação ao vivo passa contra o container do profile `dart-network-mcp`.

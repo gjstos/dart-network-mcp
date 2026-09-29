@@ -1,7 +1,7 @@
 import 'dart:io';
 import 'dart:typed_data';
 
-import 'package:dart_vm_mcp/src/session_store.dart';
+import 'package:dart_network_mcp/src/session_store.dart';
 import 'package:test/test.dart';
 
 void main() {
@@ -9,7 +9,7 @@ void main() {
   late String dbPath;
 
   setUp(() {
-    tempDir = Directory.systemTemp.createTempSync('dart-vm-mcp');
+    tempDir = Directory.systemTemp.createTempSync('dart-network-mcp');
     dbPath = '${tempDir.path}/network.sqlite';
   });
 

@@ -2,10 +2,10 @@ import 'dart:convert';
 import 'dart:io';
 import 'dart:typed_data';
 
-import 'package:dart_vm_mcp/src/dart_vm_mcp.dart';
-import 'package:dart_vm_mcp/src/session_store.dart';
-import 'package:dart_vm_mcp/src/tool_json.dart';
-import 'package:dart_vm_mcp/src/vm_uri.dart';
+import 'package:dart_network_mcp/src/dart_network_mcp.dart';
+import 'package:dart_network_mcp/src/session_store.dart';
+import 'package:dart_network_mcp/src/tool_json.dart';
+import 'package:dart_network_mcp/src/vm_uri.dart';
 import 'package:test/test.dart';
 
 import 'support/fake_vm_service.dart';
@@ -14,13 +14,13 @@ void main() {
   late Directory tempDir;
   late String dataDir;
   late SessionStore store;
-  late DartVmMcp mcp;
+  late DartNetworkMcp mcp;
 
   setUp(() async {
-    tempDir = Directory.systemTemp.createTempSync('dart-vm-mcp-tool');
+    tempDir = Directory.systemTemp.createTempSync('dart-network-mcp-tool');
     dataDir = tempDir.path;
     store = SessionStore.open('$dataDir/network.sqlite');
-    mcp = DartVmMcp(store: store, dataDirectory: dataDir);
+    mcp = DartNetworkMcp(store: store, dataDirectory: dataDir);
   });
 
   tearDown(() async {
@@ -51,7 +51,7 @@ void main() {
     return canonicalizeVmUri(fake.consoleHttpUri);
   }
 
-  group('DartVmMcp', () {
+  group('DartNetworkMcp', () {
     test('listRequests includes response body text', () async {
       final fake = await FakeVmService.start();
       fake.addRequest(
@@ -77,10 +77,10 @@ void main() {
 
     test('attachVm uses the pubspec package name as appName', () async {
       final fake = await FakeVmService.start(
-        rootLibUri: 'package:dart_vm_mcp_example/main.dart',
+        rootLibUri: 'package:dart_network_mcp_example/main.dart',
       );
       final result = await mcp.attachVm(fake.consoleHttpUri, inDocker: false);
-      expect(result['appName'], 'dart_vm_mcp_example');
+      expect(result['appName'], 'dart_network_mcp_example');
       await fake.close();
     });
 

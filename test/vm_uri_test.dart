@@ -1,4 +1,4 @@
-import 'package:dart_vm_mcp/src/vm_uri.dart';
+import 'package:dart_network_mcp/src/vm_uri.dart';
 import 'package:test/test.dart';
 
 void main() {

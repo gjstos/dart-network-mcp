@@ -1,7 +1,7 @@
 import 'dart:convert';
 import 'dart:typed_data';
 
-import 'package:dart_vm_mcp/src/session_store.dart';
+import 'package:dart_network_mcp/src/session_store.dart';
 
 Map<String, Object?> buildHar(
   List<RequestRecord> requests, {
@@ -11,7 +11,7 @@ Map<String, Object?> buildHar(
     'log': {
       'version': '1.2',
       'creator': {
-        'name': 'dart-vm-mcp',
+        'name': 'dart-network-mcp',
         'version': version,
       },
       'entries': requests.map(_entryFromRequest).toList(),

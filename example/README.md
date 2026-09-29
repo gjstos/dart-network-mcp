@@ -1,6 +1,6 @@
-# dart_vm_mcp_example
+# dart_network_mcp_example
 
-App Flutter de debug que gera HTTP previsível para o servidor `dart-vm-mcp`.
+App Flutter de debug que gera HTTP previsível para o servidor `dart-network-mcp`.
 
 `main` liga `HttpClient.enableTimelineLogging` antes do `runApp`. Sem isso, o profiler do `dart:io` não grava o request que já começou.
 

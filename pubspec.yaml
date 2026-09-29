@@ -1,4 +1,4 @@
-name: dart_vm_mcp
+name: dart_network_mcp
 description: MCP server for Dart VM HTTP profiles.
 version: 0.1.0
 publish_to: none

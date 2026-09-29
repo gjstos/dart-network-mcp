@@ -7,7 +7,7 @@ Map<String, Object?> mergeMcpServerEntry(
   final servers = Map<String, Object?>.from(
     existing is Map ? existing.cast<String, Object?>() : {},
   );
-  servers['dart-vm-mcp'] = entry;
+  servers['dart-network-mcp'] = entry;
   result['mcpServers'] = servers;
   return result;
 }

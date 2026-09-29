@@ -1,4 +1,4 @@
-# Guia de uso: dart-vm-mcp
+# Guia de uso: dart-network-mcp
 
 Servidor MCP que anexa em VMs Dart já em execução e expõe o tráfego HTTP do HTTP profile (`dart:io`). Cada sessão é uma chave: a URI WebSocket canônica da VM Service.
 
@@ -16,9 +16,9 @@ bash install.sh --claude --cursor # os dois
 
 Pelo menos uma flag é obrigatória. O script:
 
-1. constrói a imagem `dart-vm-mcp:local` (salvo `DART_VM_MCP_INSTALL_SKIP_DOCKER=1`);
-2. grava o catálogo e o profile Docker MCP `dart-vm-mcp`;
-3. mescla a entrada `dart-vm-mcp` no cliente — **não** altera `MCP_DOCKER` nem outros servidores.
+1. constrói a imagem `dart-network-mcp:local` (salvo `DART_NETWORK_MCP_INSTALL_SKIP_DOCKER=1`);
+2. grava o catálogo e o profile Docker MCP `dart-network-mcp`;
+3. mescla a entrada `dart-network-mcp` no cliente — **não** altera `MCP_DOCKER` nem outros servidores.
 
 Entrada típica do cliente (`docker run` stdio long-lived):
 
@@ -29,12 +29,12 @@ Entrada típica do cliente (`docker run` stdio long-lived):
     "run", "-i", "--rm",
     "--add-host=host.docker.internal:host-gateway",
     "-e", "HOME=/home/mcp",
-    "-e", "DART_VM_MCP_DATA=/data",
-    "-e", "DART_VM_MCP_IN_DOCKER=1",
+    "-e", "DART_NETWORK_MCP_DATA=/data",
+    "-e", "DART_NETWORK_MCP_IN_DOCKER=1",
     "-v", "<home>/.dart-tool:/home/mcp/.dart-tool:ro",
     "-v", "<data>:/data:rw",
     "-u", "<uid>:<gid>",
-    "dart-vm-mcp:local"
+    "dart-network-mcp:local"
   ]
 }
 ```
@@ -47,11 +47,11 @@ Diretório de dados:
 
 | Prioridade | Caminho |
 |---|---|
-| 1 | `$DART_VM_MCP_DATA` |
-| 2 | `%LOCALAPPDATA%\dart-vm-mcp` (se `LOCALAPPDATA` existir) |
-| 3 | `~/.local/share/dart-vm-mcp` |
+| 1 | `$DART_NETWORK_MCP_DATA` |
+| 2 | `%LOCALAPPDATA%\dart-network-mcp` (se `LOCALAPPDATA` existir) |
+| 3 | `~/.local/share/dart-network-mcp` |
 
-No container: `DART_VM_MCP_DATA=/data`. SQLite em `network.sqlite`; exports em `exports/`.
+No container: `DART_NETWORK_MCP_DATA=/data`. SQLite em `network.sqlite`; exports em `exports/`.
 
 O SQLite e os exports guardam headers e bodies completos (`Authorization`, cookies, etc.). Trate como credenciais. No Unix o diretório fica `0700` e o arquivo `0600`.
 
@@ -109,7 +109,7 @@ O banco usa snake_case; o JSON das tools usa camelCase.
     {
       "vmUri": "ws://127.0.0.1:55530/tok=/ws",
       "state": "live",
-      "appName": "dart_vm_mcp_example",
+      "appName": "dart_network_mcp_example",
       "httpProfileAvailable": true
     }
   ],
@@ -126,7 +126,7 @@ O banco usa snake_case; o JSON das tools usa camelCase.
 ```json
 {
   "vmUri": "ws://…",
-  "appName": "dart_vm_mcp_example",
+  "appName": "dart_network_mcp_example",
   "isolates": ["isolates/…"],
   "state": "history",
   "disconnectReason": "socket closed",
@@ -218,7 +218,7 @@ Sem `startTime` e com mais de uma linha para o mesmo `requestId`: `ambiguous_req
 
 ```json
 {
-  "path": "/data/exports/dart_vm_mcp_20260929T021600_8ff87291.har",
+  "path": "/data/exports/dart_network_mcp_20260929T021600_8ff87291.har",
   "requestCount": 217,
   "bytes": 48012,
   "vmUri": "ws://…",
@@ -226,7 +226,7 @@ Sem `startTime` e com mais de uma linha para o mesmo `requestId`: `ambiguous_req
 }
 ```
 
-Arquivo no host: `<dataDir>/exports/dart_vm_mcp_<yyyyMMddTHHmmss>_<8 hex SHA-1 de vmUri>.har` ou `.json`. Timestamp local. Zero requests ainda gera arquivo válido.
+Arquivo no host: `<dataDir>/exports/dart_network_mcp_<yyyyMMddTHHmmss>_<8 hex SHA-1 de vmUri>.har` ou `.json`. Timestamp local. Zero requests ainda gera arquivo válido.
 
 No snapshot DevTools, `connectedApp.isFlutterApp` só é true com sessão **live** que registrue `ext.flutter.*`. Em history pura fica `false`.
 

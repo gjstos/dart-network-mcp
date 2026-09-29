@@ -1,4 +1,4 @@
-package com.example.dart_vm_mcp_example
+package com.example.dart_network_mcp_example
 
 import io.flutter.embedding.android.FlutterActivity
 

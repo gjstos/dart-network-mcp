@@ -1,8 +1,8 @@
 import 'dart:io';
 
-import 'package:dart_vm_mcp/src/session_store.dart';
-import 'package:dart_vm_mcp/src/vm_session.dart';
-import 'package:dart_vm_mcp/src/vm_uri.dart';
+import 'package:dart_network_mcp/src/session_store.dart';
+import 'package:dart_network_mcp/src/vm_session.dart';
+import 'package:dart_network_mcp/src/vm_uri.dart';
 import 'package:test/test.dart';
 
 import 'support/fake_vm_service.dart';
@@ -13,7 +13,7 @@ void main() {
   late SessionStore store;
 
   setUp(() async {
-    tempDir = Directory.systemTemp.createTempSync('dart-vm-mcp-session');
+    tempDir = Directory.systemTemp.createTempSync('dart-network-mcp-session');
     dbPath = '${tempDir.path}/network.sqlite';
     store = SessionStore.open(dbPath);
   });
@@ -80,11 +80,11 @@ void main() {
 
     test('appName is the package name from the root library', () async {
       final fake = await FakeVmService.start(
-        rootLibUri: 'package:dart_vm_mcp_example/main.dart',
+        rootLibUri: 'package:dart_network_mcp_example/main.dart',
       );
       final session = await attachFake(fake);
       final key = canonicalizeVmUri(fake.consoleHttpUri);
-      expect(store.getSession(key)?.appName, 'dart_vm_mcp_example');
+      expect(store.getSession(key)?.appName, 'dart_network_mcp_example');
       await session.dispose();
       await fake.close();
     });

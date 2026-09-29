@@ -1,4 +1,4 @@
-# dart-vm-mcp
+# dart-network-mcp
 
 Servidor MCP que faz attach em VMs Dart já em execução e expõe o tráfego HTTP capturado pelo HTTP profile da VM. Cada sessão é identificada pela URI da VM — essa URI é a chave usada em todas as tools de tráfego.
 
@@ -24,9 +24,9 @@ bash install.sh --cursor
 bash install.sh --claude --cursor
 ```
 
-Pelo menos uma flag (`--claude` ou `--cursor`) é obrigatória. O script registra o profile Docker MCP `dart-vm-mcp` e mescla a entrada do servidor no JSON do cliente escolhido. **Não remove** outros servidores MCP já configurados (incluindo entradas como `MCP_DOCKER`).
+Pelo menos uma flag (`--claude` ou `--cursor`) é obrigatória. O script registra o profile Docker MCP `dart-network-mcp` e mescla a entrada do servidor no JSON do cliente escolhido. **Não remove** outros servidores MCP já configurados (incluindo entradas como `MCP_DOCKER`).
 
-Requisitos típicos: Docker, `docker mcp`, Dart SDK (para o merge de config) e imagem local `dart-vm-mcp:local` (build feito pelo script, salvo `DART_VM_MCP_INSTALL_SKIP_DOCKER`).
+Requisitos típicos: Docker, `docker mcp`, Dart SDK (para o merge de config) e imagem local `dart-network-mcp:local` (build feito pelo script, salvo `DART_NETWORK_MCP_INSTALL_SKIP_DOCKER`).
 
 ## Tools MCP
 

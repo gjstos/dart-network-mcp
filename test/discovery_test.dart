@@ -1,6 +1,6 @@
 import 'dart:io';
 
-import 'package:dart_vm_mcp/src/discovery.dart';
+import 'package:dart_network_mcp/src/discovery.dart';
 import 'package:test/test.dart';
 
 void main() {

@@ -12,8 +12,8 @@ import 'tool_json.dart';
 import 'vm_session.dart';
 import 'vm_uri.dart';
 
-class DartVmMcp {
-  DartVmMcp({
+class DartNetworkMcp {
+  DartNetworkMcp({
     required this.store,
     required this.dataDirectory,
     this.version = '0.1.0',
@@ -335,7 +335,7 @@ class DartVmMcp {
     exportsDir.createSync(recursive: true);
     final stamp = _exportTimestamp();
     final hash = sha1.convert(utf8.encode(vmUri)).toString().substring(0, 8);
-    final fileName = 'dart_vm_mcp_${stamp}_$hash.$extension';
+    final fileName = 'dart_network_mcp_${stamp}_$hash.$extension';
     final path = '${exportsDir.path}/$fileName';
     File(path).writeAsStringSync(contents);
     return path;
