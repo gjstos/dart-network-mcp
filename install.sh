@@ -128,51 +128,16 @@ if [[ -z "${DART_NETWORK_MCP_INSTALL_SKIP_DOCKER:-}" ]]; then
   ensure_docker_mcp_profile
 fi
 
-export INSTALL_HOME="$home"
-export INSTALL_DATA_DIR="$data_dir"
+export INSTALL_RUN_SCRIPT="$SCRIPT_DIR/tool/run_mcp_container.sh"
 
 client_entry_json() {
   python3 - <<'PY'
 import json
 import os
 
-home = os.environ["INSTALL_HOME"]
-data = os.environ["INSTALL_DATA_DIR"]
-uid = os.environ.get("INSTALL_UID", "")
-gid = os.environ.get("INSTALL_GID", "")
-args = [
-    "run",
-    "-i",
-    "--rm",
-    "--add-host=host.docker.internal:host-gateway",
-    "-e",
-    "HOME=/home/mcp",
-    "-e",
-    "DART_NETWORK_MCP_DATA=/data",
-    "-e",
-    "DART_NETWORK_MCP_IN_DOCKER=1",
-    "-v",
-    f"{home}/.dart-tool:/home/mcp/.dart-tool:ro",
-    "-v",
-    f"{data}:/data:rw",
-]
-if uid and gid:
-    args.extend(["-u", f"{uid}:{gid}"])
-args.append("dart-network-mcp:local")
-print(json.dumps({"command": "docker", "args": args}))
+print(json.dumps({"command": os.environ["INSTALL_RUN_SCRIPT"], "args": []}))
 PY
 }
-
-export INSTALL_UID=""
-export INSTALL_GID=""
-case "$(uname -s)" in
-  MINGW*|MSYS*|CYGWIN*) ;;
-  *)
-    INSTALL_UID="$(id -u)"
-    INSTALL_GID="$(id -g)"
-    export INSTALL_UID INSTALL_GID
-    ;;
-esac
 
 merge_client_config() {
   local target="$1"

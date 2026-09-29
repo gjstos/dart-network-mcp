@@ -20,26 +20,16 @@ Pelo menos uma flag é obrigatória. O script:
 2. grava o catálogo e o profile Docker MCP `dart-network-mcp`;
 3. mescla a entrada `dart-network-mcp` no cliente — **não** altera `MCP_DOCKER` nem outros servidores.
 
-Entrada típica do cliente (`docker run` stdio long-lived):
+Entrada do cliente: o install aponta para `tool/run_mcp_container.sh`. O script remove os containers da imagem (incluindo os de nome aleatório e os da tag antiga `dart-vm-mcp:local`) e sobe um só, com `--name dart-network-mcp` e `--rm`.
 
 ```json
 {
-  "command": "docker",
-  "args": [
-    "run", "-i", "--rm",
-    "--add-host=host.docker.internal:host-gateway",
-    "-e", "HOME=/home/mcp",
-    "-e", "DART_NETWORK_MCP_DATA=/data",
-    "-e", "DART_NETWORK_MCP_IN_DOCKER=1",
-    "-v", "<home>/.dart-tool:/home/mcp/.dart-tool:ro",
-    "-v", "<data>:/data:rw",
-    "-u", "<uid>:<gid>",
-    "dart-network-mcp:local"
-  ]
+  "command": "<repo>/tool/run_mcp_container.sh",
+  "args": []
 }
 ```
 
-O servidor é **long-lived**. O install grava `docker run -i` (não `docker mcp gateway`): no Docker Desktop o gateway costuma falhar ao usar `unix:///var/run/docker.sock`. Chamadas one-shot mal observam o poll de 1s do HTTP profile.
+O servidor é **long-lived**. O script faz `docker run -i` (não `docker mcp gateway`): no Docker Desktop o gateway costuma falhar ao usar `unix:///var/run/docker.sock`. Chamadas one-shot mal observam o poll de 1s do HTTP profile.
 
 ## Dados e privacidade
 
