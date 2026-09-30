@@ -10,6 +10,10 @@ void main() {
             'command': 'docker',
             'args': ['mcp', 'gateway', 'run'],
           },
+          'dart-vm-mcp': {
+            'command': 'docker',
+            'args': ['run', 'dart-vm-mcp:local'],
+          },
         },
       },
       {
@@ -26,5 +30,18 @@ void main() {
       (servers['dart-network-mcp'] as Map)['args'],
       ['mcp', 'gateway', 'run', '--profile', 'dart-network-mcp'],
     );
+    expect(servers.containsKey('dart-vm-mcp'), isFalse);
+  });
+
+  test('removeOurMcpServers drops only this server from every agent file', () {
+    final stripped = removeOurMcpServers({
+      'mcpServers': {
+        'MCP_DOCKER': {'command': 'docker'},
+        'dart-network-mcp': {'command': 'old'},
+        'dart-vm-mcp': {'command': 'older'},
+      },
+    });
+    final servers = stripped['mcpServers'] as Map;
+    expect(servers.keys, ['MCP_DOCKER']);
   });
 }

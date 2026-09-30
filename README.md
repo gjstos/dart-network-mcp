@@ -24,9 +24,12 @@ Na raiz do repositório:
 bash install.sh --claude
 bash install.sh --cursor
 bash install.sh --claude --cursor
+bash install.sh --fresh --claude --cursor
 ```
 
 Pelo menos uma flag (`--claude` ou `--cursor`) é obrigatória. O script registra o profile Docker MCP `dart-network-mcp` e mescla a entrada do servidor no JSON do cliente escolhido. **Não remove** outros servidores MCP já configurados (incluindo entradas como `MCP_DOCKER`).
+
+`--fresh` limpa antes de instalar: tira `dart-network-mcp` e `dart-vm-mcp` do Claude e do Cursor, apaga o diretório de dados e os catálogos deste servidor, remove o profile Docker e as imagens e containers `dart-network-mcp:local` e `dart-vm-mcp:local` (inclusive os que estão rodando). Em seguida instala de novo só nos clientes pedidos.
 
 Requisitos típicos: Docker, `docker mcp`, Dart SDK (para o merge de config) e imagem local `dart-network-mcp:local` (build feito pelo script, salvo `DART_NETWORK_MCP_INSTALL_SKIP_DOCKER`).
 

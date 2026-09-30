@@ -2,13 +2,12 @@
 set -euo pipefail
 
 IMAGE=dart-network-mcp:local
-NAME=dart-network-mcp
 
 reap_ours() {
   local id image
   local ids
   local -a drop=()
-  ids="$(docker ps -aq)"
+  ids="$(docker ps -aq --filter status=exited)"
   if [[ -z "$ids" ]]; then
     return
   fi
@@ -24,7 +23,6 @@ reap_ours() {
 }
 
 reap_ours
-docker rm -f "$NAME" >/dev/null 2>&1 || true
 
 home="${HOME:-${USERPROFILE:-}}"
 if [[ -z "$home" ]]; then
@@ -70,7 +68,6 @@ esac
 exec docker run \
   -i \
   --rm \
-  --name "$NAME" \
   --add-host=host.docker.internal:host-gateway \
   -e HOME=/home/mcp \
   -e DART_NETWORK_MCP_DATA=/data \

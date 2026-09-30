@@ -12,15 +12,18 @@ Na raiz do repositório:
 bash install.sh --claude          # mescla em ~/.claude.json
 bash install.sh --cursor          # mescla em ~/.cursor/mcp.json
 bash install.sh --claude --cursor # os dois
+bash install.sh --fresh --claude --cursor
 ```
+
+`--fresh` roda antes do install. Limpa os dois agentes (Claude e Cursor), o diretório de dados, os catálogos `dart-network-mcp.yaml` e `dart-vm-mcp.yaml`, o profile Docker e os containers e imagens `dart-network-mcp:local` e `dart-vm-mcp:local`, inclusive containers ainda em execução. Outros servidores MCP ficam no JSON. A instalação seguinte vale só para as flags `--claude` / `--cursor` passadas junto.
 
 Pelo menos uma flag é obrigatória. O script:
 
 1. constrói a imagem `dart-network-mcp:local` (salvo `DART_NETWORK_MCP_INSTALL_SKIP_DOCKER=1`);
-2. grava o catálogo e o profile Docker MCP `dart-network-mcp`;
-3. mescla a entrada `dart-network-mcp` no cliente — **não** altera `MCP_DOCKER` nem outros servidores.
+2. grava o catálogo e o profile Docker MCP `dart-network-mcp`. O YAML declara `tools` (nome e descrição de cada tool) para a aba Tools do profile no Docker Desktop listar o que dá para ativar e desativar;
+3. mescla a entrada `dart-network-mcp` no cliente e tira a entrada antiga `dart-vm-mcp`. Não altera `MCP_DOCKER` nem outros servidores.
 
-Entrada do cliente: o install aponta para `tool/run_mcp_container.sh`. O script remove os containers da imagem (incluindo os de nome aleatório e os da tag antiga `dart-vm-mcp:local`) e sobe um só, com `--name dart-network-mcp` e `--rm`.
+Entrada do cliente: o install aponta para `tool/run_mcp_container.sh`. Cada cliente sobe o próprio container com `--rm`. O script só apaga containers já parados dessas imagens, para um segundo start (Cursor e Claude ao mesmo tempo) não derrubar a sessão que acabou de responder.
 
 ```json
 {

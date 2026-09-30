@@ -3,7 +3,7 @@ import 'dart:io';
 import 'package:test/test.dart';
 
 void main() {
-  test('reaps leftover containers and starts one named container', () async {
+  test('reaps exited containers and leaves a running session alone', () async {
     final temp = Directory.systemTemp.createTempSync('run-mcp-container');
     addTearDown(() => temp.deleteSync(recursive: true));
 
@@ -14,21 +14,20 @@ void main() {
 #!/bin/sh
 printf '%s\n' "$*" >> "$FAKE_DOCKER_LOG"
 if [ "$1" = "ps" ]; then
-  printf '%s\n' idnet
-  printf '%s\n' idvm1
-  printf '%s\n' idother
+  case "$*" in
+    *status=exited*)
+      printf '%s\n' idexited
+      printf '%s\n' idother
+      ;;
+  esac
   exit 0
 fi
 if [ "$1" = "inspect" ]; then
   case "$4" in
-    idnet) printf '%s\n' dart-network-mcp:local ;;
-    idvm1) printf '%s\n' dart-vm-mcp:local ;;
+    idexited) printf '%s\n' dart-vm-mcp:local ;;
     *) printf '%s\n' postgres:16 ;;
   esac
   exit 0
-fi
-if [ "$1" = "rm" ] && [ "$3" = "dart-network-mcp" ]; then
-  exit 1
 fi
 exit 0
 ''');
@@ -52,25 +51,19 @@ exit 0
     expect(result.stdout, isEmpty);
 
     final lines = log.readAsLinesSync();
-    expect(lines, contains('ps -aq'));
-    expect(
-      lines,
-      containsAll([
-        'inspect -f {{.Config.Image}} idnet',
-        'inspect -f {{.Config.Image}} idvm1',
-        'inspect -f {{.Config.Image}} idother',
-        'rm -f idnet idvm1',
-        'rm -f dart-network-mcp',
-      ]),
-    );
+    expect(lines, contains('ps -aq --filter status=exited'));
+    expect(lines, contains('inspect -f {{.Config.Image}} idexited'));
+    expect(lines, contains('inspect -f {{.Config.Image}} idother'));
+    expect(lines, contains('rm -f idexited'));
     expect(
       lines.where((line) => line.startsWith('rm ')).join('\n'),
       isNot(contains('idother')),
     );
+    expect(lines.join('\n'), isNot(contains('rm -f dart-network-mcp')));
 
     final run = lines.last;
     expect(run, startsWith('run '));
-    expect(run, contains('--name dart-network-mcp'));
+    expect(run, isNot(contains('--name dart-network-mcp')));
     expect(run, contains('-i'));
     expect(run, contains('--rm'));
     expect(run, contains('${home.path}/.dart-tool:/home/mcp/.dart-tool:ro'));

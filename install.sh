@@ -5,6 +5,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 INSTALL_CLAUDE=false
 INSTALL_CURSOR=false
+INSTALL_FRESH=false
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -14,6 +15,10 @@ while [[ $# -gt 0 ]]; do
       ;;
     --cursor)
       INSTALL_CURSOR=true
+      shift
+      ;;
+    --fresh)
+      INSTALL_FRESH=true
       shift
       ;;
     *)
@@ -73,6 +78,62 @@ resolve_dart_dtd_dir() {
 }
 
 data_dir="$(resolve_data_dir)"
+
+remove_server_data_dir() {
+  local dir="$1"
+  case "$(basename "$dir")" in
+    dart-network-mcp | dart-vm-mcp) rm -rf "$dir" ;;
+  esac
+}
+
+legacy_data_dir() {
+  if [[ -n "${LOCALAPPDATA:-}" ]]; then
+    printf '%s' "${LOCALAPPDATA}/dart-vm-mcp"
+    return
+  fi
+  printf '%s' "$home/.local/share/dart-vm-mcp"
+}
+
+strip_agent_config() {
+  local target="$1"
+  if [[ -f "$target" ]]; then
+    dart run "$SCRIPT_DIR/tool/merge_mcp_config.dart" --strip "$target"
+  fi
+}
+
+fresh_clean_docker() {
+  local id image
+  local ids
+  local -a drop=()
+  ids="$(docker ps -aq)"
+  if [[ -n "$ids" ]]; then
+    for id in $ids; do
+      image="$(docker inspect -f '{{.Config.Image}}' "$id")"
+      case "$image" in
+        dart-network-mcp:local | dart-vm-mcp:local) drop+=("$id") ;;
+      esac
+    done
+    if ((${#drop[@]})); then
+      docker rm -f "${drop[@]}" >/dev/null
+    fi
+  fi
+  docker rmi dart-network-mcp:local dart-vm-mcp:local >/dev/null 2>&1 || true
+  docker mcp profile remove dart-network-mcp >/dev/null 2>&1 || true
+}
+
+if $INSTALL_FRESH; then
+  strip_agent_config "$home/.claude.json"
+  strip_agent_config "$home/.cursor/mcp.json"
+  remove_server_data_dir "$data_dir"
+  remove_server_data_dir "$(legacy_data_dir)"
+  rm -f \
+    "$home/.docker/mcp/catalogs/dart-network-mcp.yaml" \
+    "$home/.docker/mcp/catalogs/dart-vm-mcp.yaml"
+  if [[ -z "${DART_NETWORK_MCP_INSTALL_SKIP_DOCKER:-}" ]]; then
+    fresh_clean_docker
+  fi
+fi
+
 dart_tool_dir="$home/.dart-tool"
 dart_dtd_dir="$(resolve_dart_dtd_dir)"
 catalog_dir="$home/.docker/mcp/catalogs"
@@ -125,6 +186,27 @@ env:
     value: "1"
   - name: DART_NETWORK_MCP_DTD_DIR
     value: /home/mcp/Dart/dtd
+tools:
+  - name: list_sessions
+    description: List VM sessions
+  - name: get_session
+    description: Get one VM session
+  - name: attach_vm
+    description: Attach to a VM by URI
+  - name: list_requests
+    description: List HTTP calls for a session
+  - name: get_request
+    description: Get one HTTP profile request
+  - name: export_har
+    description: Export session traffic as HAR
+  - name: export_devtools_json
+    description: Export session traffic as DevTools JSON
+  - name: delete_session
+    description: Delete a session and its stored requests
+  - name: get_retention
+    description: Return the session retention period in days
+  - name: set_retention
+    description: Set the session retention period in days
 ${user_block}${extra_hosts_block}
 EOF
 }
