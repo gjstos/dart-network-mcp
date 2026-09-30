@@ -110,9 +110,20 @@ fresh_clean_docker() {
   docker rmi dart-network-mcp:local dart-vm-mcp:local >/dev/null 2>&1 || true
 }
 
+skill_name="dart-network-mcp"
+
+# The skill teaches agents the tool workflow; it ships with the server so one
+# install gives both. Copied, not linked, so the repo can move after install.
+install_skill() {
+  local dest="$1/$skill_name"
+  mkdir -p "$dest"
+  cp "$SCRIPT_DIR/skills/$skill_name/SKILL.md" "$dest/SKILL.md"
+}
+
 if $INSTALL_FRESH; then
   strip_agent_config "$home/.claude.json"
   strip_agent_config "$home/.cursor/mcp.json"
+  rm -rf "$home/.claude/skills/$skill_name" "$home/.cursor/skills/$skill_name"
   remove_server_data_dir "$data_dir"
   remove_server_data_dir "$(legacy_data_dir)"
   rm -f \
@@ -167,8 +178,10 @@ merge_client_config() {
 
 if $INSTALL_CLAUDE; then
   merge_client_config "$home/.claude.json"
+  install_skill "$home/.claude/skills"
 fi
 
 if $INSTALL_CURSOR; then
   merge_client_config "$home/.cursor/mcp.json"
+  install_skill "$home/.cursor/skills"
 fi

@@ -27,9 +27,9 @@ bash install.sh --claude --cursor
 bash install.sh --fresh --claude --cursor
 ```
 
-Pelo menos uma flag (`--claude` ou `--cursor`) é obrigatória. O script compila o servidor nativo (`dart compile exe`) para `~/.local/bin/dart_network_mcp` e mescla a entrada no JSON do cliente escolhido. **Não remove** outros servidores MCP já configurados.
+Pelo menos uma flag (`--claude` ou `--cursor`) é obrigatória. O script compila o servidor nativo (`dart compile exe`) para `~/.local/bin/dart_network_mcp` e mescla a entrada no JSON do cliente escolhido. Também instala a skill `dart-network-mcp` (fluxo de uso das tools e armadilhas) em `~/.claude/skills/` e/ou `~/.cursor/skills/`, valendo globalmente. **Não remove** outros servidores MCP já configurados.
 
-`--fresh` limpa antes de instalar: tira `dart-network-mcp` e `dart-vm-mcp` do Claude e do Cursor e apaga o diretório de dados. Se o Docker estiver disponível, também remove resquícios de instalações antigas (catálogos, profile, imagens e containers `dart-network-mcp:local` / `dart-vm-mcp:local`). Em seguida instala de novo só nos clientes pedidos.
+`--fresh` limpa antes de instalar: tira `dart-network-mcp` e `dart-vm-mcp` do Claude e do Cursor, remove a skill dos dois e apaga o diretório de dados. Se o Docker estiver disponível, também remove resquícios de instalações antigas (catálogos, profile, imagens e containers `dart-network-mcp:local` / `dart-vm-mcp:local`). Em seguida instala de novo só nos clientes pedidos.
 
 Requisitos: Dart SDK e `python3`. O SQLite vem do sistema (macOS já traz; em Linux instale `libsqlite3`). Não precisa de Docker. Variáveis: `DART_NETWORK_MCP_BIN_DIR` (destino do binário) e `DART_NETWORK_MCP_INSTALL_SKIP_BUILD=1` (só registra o cliente).
 

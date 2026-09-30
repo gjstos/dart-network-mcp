@@ -20,7 +20,8 @@ bash install.sh --fresh --claude --cursor
 Pelo menos uma flag é obrigatória. O script:
 
 1. compila o servidor com `dart compile exe` para `$DART_NETWORK_MCP_BIN_DIR` (padrão `~/.local/bin/dart_network_mcp`; salvo `DART_NETWORK_MCP_INSTALL_SKIP_BUILD=1`);
-2. mescla a entrada `dart-network-mcp` no cliente e tira a entrada antiga `dart-vm-mcp`. Não altera outros servidores.
+2. mescla a entrada `dart-network-mcp` no cliente e tira a entrada antiga `dart-vm-mcp`. Não altera outros servidores;
+3. copia `skills/dart-network-mcp/SKILL.md` para `~/.claude/skills/dart-network-mcp/` (`--claude`) e/ou `~/.cursor/skills/dart-network-mcp/` (`--cursor`). `--fresh` remove as duas cópias antes.
 
 Entrada do cliente: o install aponta direto para o binário. Cada cliente sobe o próprio processo, que sai quando o cliente fecha o stdin.
 
