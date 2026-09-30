@@ -387,20 +387,29 @@ class DartNetworkMcp {
     return finalPath;
   }
 
+  static const _prettyJson = JsonEncoder.withIndent('  ');
+
+  String _indented(Object? value, String prefix) => _prettyJson
+      .convert(value)
+      .split('\n')
+      .map((line) => '$prefix$line')
+      .join('\n');
+
   int _writeHarIncrementally(RandomAccessFile file, String vmUri) {
     file.writeStringSync(
-      '{"log":{"version":"1.2","creator":{"name":"dart-network-mcp",'
-      '"version":${jsonEncode(version)}},"entries":[',
+      '{\n  "log": {\n    "version": "1.2",\n    "creator": {\n'
+      '      "name": "dart-network-mcp",\n'
+      '      "version": ${jsonEncode(version)}\n    },\n    "entries": [',
     );
     var count = 0;
     for (final row in _iterateStoredRequests(vmUri)) {
-      if (count > 0) {
-        file.writeStringSync(',');
-      }
-      file.writeStringSync(jsonEncode(harEntry(_exportableFromRow(row))));
+      file.writeStringSync(count > 0 ? ',\n' : '\n');
+      file.writeStringSync(
+        _indented(harEntry(_exportableFromRow(row)), '      '),
+      );
       count++;
     }
-    file.writeStringSync(']}}');
+    file.writeStringSync(count > 0 ? '\n    ]\n  }\n}\n' : ']\n  }\n}\n');
     return count;
   }
 
@@ -410,24 +419,31 @@ class DartNetworkMcp {
     bool isFlutterApp,
   ) {
     file.writeStringSync(
-      '{"devToolsSnapshot":true,"devToolsVersion":${jsonEncode('dart-network-mcp/$version')},'
-      '"activeScreenId":"network","connectedApp":{"isFlutterApp":$isFlutterApp,'
-      '"isProfileBuild":false,"isDartWebApp":false,"isRunningOnDartVM":true},'
-      '"network":{"httpRequestData":[',
+      '{\n  "devToolsSnapshot": true,\n'
+      '  "devToolsVersion": ${jsonEncode('dart-network-mcp/$version')},\n'
+      '  "activeScreenId": "network",\n'
+      '  "connectedApp": {\n'
+      '    "isFlutterApp": $isFlutterApp,\n'
+      '    "isProfileBuild": false,\n'
+      '    "isDartWebApp": false,\n'
+      '    "isRunningOnDartVM": true\n  },\n'
+      '  "network": {\n    "httpRequestData": [',
     );
     var count = 0;
     for (final row in _iterateStoredRequests(vmUri)) {
-      if (count > 0) {
-        file.writeStringSync(',');
-      }
+      file.writeStringSync(count > 0 ? ',\n' : '\n');
       file.writeStringSync(
-        jsonEncode({'request': devToolsRequest(_exportableFromRow(row))}),
+        _indented(
+            {'request': devToolsRequest(_exportableFromRow(row))}, '      '),
       );
       count++;
     }
     file.writeStringSync(
-      '],"selectedRequestId":null,"socketData":[],'
-      '"webSocketData":[],"timelineMicrosOffset":0}}',
+      '${count > 0 ? '\n    ' : ''}],\n'
+      '    "selectedRequestId": null,\n'
+      '    "socketData": [],\n'
+      '    "webSocketData": [],\n'
+      '    "timelineMicrosOffset": 0\n  }\n}\n',
     );
     return count;
   }
@@ -602,7 +618,8 @@ class DartNetworkMcp {
         result['responseBodyPath'] = record.responseBodyPath;
       }
     } else {
-      result.addAll(_bodyFields('response', _readBody(record.responseBodyPath)));
+      result
+          .addAll(_bodyFields('response', _readBody(record.responseBodyPath)));
     }
     if (record.requestBodySize > toolResponseCharBudget) {
       if (record.requestBodyPath != null) {

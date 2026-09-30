@@ -89,7 +89,7 @@ Future<void> main(List<String> args) async {
     final harPath = har['path'] as String?;
     final harOk = harPath != null &&
         File(harPath).existsSync() &&
-        File(harPath).readAsStringSync().contains('"version":"1.2"');
+        File(harPath).readAsStringSync().contains('"version": "1.2"');
     check('export_har', harOk, har);
 
     final dev = mcp.exportDevToolsJson(canonical);
