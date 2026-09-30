@@ -17,8 +17,7 @@ Map<String, Object?> buildDevToolsSnapshot(
     },
     'network': {
       'httpRequestData': [
-        for (final request in requests)
-          {'request': devToolsRequest(request)},
+        for (final request in requests) {'request': devToolsRequest(request)},
       ],
       'selectedRequestId': null,
       'socketData': <Object?>[],

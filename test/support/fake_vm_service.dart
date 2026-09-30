@@ -357,9 +357,8 @@ class FakeVmService {
     return {
       'type': 'HttpProfile',
       'timestamp': _profileTimestamp,
-      'requests': filtered
-          .map((e) => _requestJson(e, includeBodies: false))
-          .toList(),
+      'requests':
+          filtered.map((e) => _requestJson(e, includeBodies: false)).toList(),
     };
   }
 

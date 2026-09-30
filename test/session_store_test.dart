@@ -95,7 +95,8 @@ void main() {
       reopened.close();
     });
 
-    test('upsertRequest twice with same startTime keeps one row and updates statusCode',
+    test(
+        'upsertRequest twice with same startTime keeps one row and updates statusCode',
         () {
       final store = openFresh();
       store.upsertSession(liveSession('ws://a'));
@@ -158,7 +159,8 @@ void main() {
       reopened.close();
     });
 
-    test('markHistory changes state and fills disconnectReason without deleting requests',
+    test(
+        'markHistory changes state and fills disconnectReason without deleting requests',
         () {
       final store = openFresh();
       store.upsertSession(liveSession('ws://a'));
@@ -247,7 +249,8 @@ void main() {
 
     test('migrates inline blobs into files and drops raw_json', () {
       final db = sqlite3.open(dbPath);
-      db.execute('CREATE TABLE sessions (vm_uri TEXT PRIMARY KEY, state TEXT, app_name TEXT, isolate_ids TEXT, started_at INTEGER, disconnected_at INTEGER, disconnect_reason TEXT, http_profile_available INTEGER)');
+      db.execute(
+          'CREATE TABLE sessions (vm_uri TEXT PRIMARY KEY, state TEXT, app_name TEXT, isolate_ids TEXT, started_at INTEGER, disconnected_at INTEGER, disconnect_reason TEXT, http_profile_available INTEGER)');
       db.execute('''CREATE TABLE requests (
     vm_uri TEXT, request_id TEXT, isolate_id TEXT, method TEXT, uri TEXT,
     start_time INTEGER, end_time INTEGER, status_code INTEGER, reason_phrase TEXT,

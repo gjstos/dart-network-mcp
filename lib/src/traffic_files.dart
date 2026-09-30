@@ -123,11 +123,13 @@ class TrafficFiles implements TrafficFileStore {
       if (!file.existsSync()) {
         return const HeaderMaps(requestHeaders: {}, responseHeaders: {});
       }
-      final decoded = jsonDecode(file.readAsStringSync()) as Map<String, dynamic>;
+      final decoded =
+          jsonDecode(file.readAsStringSync()) as Map<String, dynamic>;
       Map<String, String> mapOf(String key) {
         final raw = decoded[key] as Map<String, dynamic>? ?? {};
         return raw.map((k, v) => MapEntry(k, v as String));
       }
+
       return HeaderMaps(
         requestHeaders: mapOf('requestHeaders'),
         responseHeaders: mapOf('responseHeaders'),

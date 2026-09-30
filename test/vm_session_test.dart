@@ -148,7 +148,8 @@ void main() {
       await fake.close();
     });
 
-    test('same requestId with different startTime creates second row', () async {
+    test('same requestId with different startTime creates second row',
+        () async {
       final fake = await FakeVmService.start();
       final session = await attachFake(fake);
       final key = canonicalizeVmUri(fake.consoleHttpUri);
@@ -341,7 +342,8 @@ void main() {
         ),
       );
       await session.pollOnce();
-      expect(store.listRequests(vmUri: key).single.requestId, 'after-extension');
+      expect(
+          store.listRequests(vmUri: key).single.requestId, 'after-extension');
       await session.dispose();
       await fake.close();
     });
@@ -446,7 +448,6 @@ void main() {
         () async {
       final fake = await FakeVmService.start();
       final session = await attachFake(fake);
-      final key = canonicalizeVmUri(fake.consoleHttpUri);
 
       fake.addRequest(
         FakeHttpProfileEntry(
@@ -462,13 +463,15 @@ void main() {
 
       await session.pollOnce();
       expect(fake.clearHttpProfileCalls, 0,
-          reason: 'in-flight request absent from updatedSince delta but still tracked, must not clear');
+          reason:
+              'in-flight request absent from updatedSince delta but still tracked, must not clear');
 
       await session.dispose();
       await fake.close();
     });
 
-    test('persist failure does not advance timestamp so request is visible on next pollOnce',
+    test(
+        'persist failure does not advance timestamp so request is visible on next pollOnce',
         () async {
       var shouldThrow = true;
       final failStore = SessionStore.open(
@@ -533,7 +536,8 @@ void main() {
       );
       await session.pollOnce();
 
-      final row = store.findByRequestId(vmUri: key, requestId: 'slow-post').single;
+      final row =
+          store.findByRequestId(vmUri: key, requestId: 'slow-post').single;
       expect(row.statusCode, 201);
       expect(row.responseBodySize, 2);
       expect(row.endTime, isNotNull);
@@ -563,9 +567,11 @@ void main() {
       await session.pollOnce();
 
       fake.failNextGetHttpProfileRequest = true;
-      fake.updateRequestStatus(id: 'keep-body', startTime: 7000, statusCode: 206);
+      fake.updateRequestStatus(
+          id: 'keep-body', startTime: 7000, statusCode: 206);
       await session.pollOnce();
-      var row = store.findByRequestId(vmUri: key, requestId: 'keep-body').single;
+      var row =
+          store.findByRequestId(vmUri: key, requestId: 'keep-body').single;
       expect(row.statusCode, 206);
       expect(row.responseBodyPath, isNotNull);
       expect(row.responseBodySize, 3);

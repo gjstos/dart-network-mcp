@@ -14,8 +14,7 @@ Directory defaultDartDtdDirectory({
     return Directory(override);
   }
 
-  final resolvedHome =
-      home ?? env['HOME'] ?? env['USERPROFILE'] ?? '';
+  final resolvedHome = home ?? env['HOME'] ?? env['USERPROFILE'] ?? '';
   final os = operatingSystem ?? Platform.operatingSystem;
   final ctx = os == 'windows' ? p.windows : p.posix;
 
@@ -127,21 +126,22 @@ Future<List<String>> probeDevToolsDtdUris({
   }
 }
 
-Future<String?> _devToolsDtdUri(HttpClient client, String host, int port) async {
+Future<String?> _devToolsDtdUri(
+    HttpClient client, String host, int port) async {
   try {
     final request = await client.getUrl(
       Uri(scheme: 'http', host: host, port: port, path: '/api/getDtdUri'),
     );
     final response = await request.close().timeout(
-      const Duration(seconds: 1),
-    );
+          const Duration(seconds: 1),
+        );
     if (response.statusCode != 200) {
       await response.drain<void>();
       return null;
     }
     final body = await utf8.decodeStream(response).timeout(
-      const Duration(seconds: 1),
-    );
+          const Duration(seconds: 1),
+        );
     final json = jsonDecode(body);
     if (json is! Map) return null;
     final raw = _jsonString(json['dtdUri']);

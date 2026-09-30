@@ -4,7 +4,8 @@ import 'package:test/test.dart';
 void main() {
   test('DART_NETWORK_MCP_DATA wins', () {
     expect(
-      resolveDataDirectory({'DART_NETWORK_MCP_DATA': '/data', 'HOME': '/home/a'}),
+      resolveDataDirectory(
+          {'DART_NETWORK_MCP_DATA': '/data', 'HOME': '/home/a'}),
       '/data',
     );
   });

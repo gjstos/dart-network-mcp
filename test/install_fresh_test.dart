@@ -4,7 +4,9 @@ import 'dart:io';
 import 'package:test/test.dart';
 
 void main() {
-  test('--fresh clears every agent and docker leftovers, then registers the native binary', () async {
+  test(
+      '--fresh clears every agent and docker leftovers, then registers the native binary',
+      () async {
     final temp = Directory.systemTemp.createTempSync('install-fresh');
     addTearDown(() => temp.deleteSync(recursive: true));
 
@@ -61,7 +63,8 @@ exit 0
 
     final catalogs = Directory('${home.path}/.docker/mcp/catalogs')
       ..createSync(recursive: true);
-    File('${catalogs.path}/dart-network-mcp.yaml').writeAsStringSync('old: true\n');
+    File('${catalogs.path}/dart-network-mcp.yaml')
+        .writeAsStringSync('old: true\n');
     File('${catalogs.path}/dart-vm-mcp.yaml').writeAsStringSync('old: true\n');
     File('${catalogs.path}/other.yaml').writeAsStringSync('keep: true\n');
 
@@ -103,12 +106,14 @@ exit 0
     expect(legacyData.existsSync(), isFalse);
     expect(File('${catalogs.path}/dart-vm-mcp.yaml').existsSync(), isFalse);
     expect(File('${catalogs.path}/other.yaml').existsSync(), isTrue);
-    expect(File('${catalogs.path}/dart-network-mcp.yaml').existsSync(), isFalse);
+    expect(
+        File('${catalogs.path}/dart-network-mcp.yaml').existsSync(), isFalse);
 
     final lines = log.readAsLinesSync();
     expect(lines, contains('ps -aq'));
     expect(lines, contains('rm -f idlive idold'));
-    expect(lines.join('\n'), contains('rmi dart-network-mcp:local dart-vm-mcp:local'));
+    expect(lines.join('\n'),
+        contains('rmi dart-network-mcp:local dart-vm-mcp:local'));
     expect(lines.join('\n'), contains('mcp profile remove dart-network-mcp'));
     expect(lines.join('\n'), isNot(contains('postgres')));
   });

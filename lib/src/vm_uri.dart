@@ -11,5 +11,8 @@ String canonicalizeVmUri(String raw) {
   if (segments.isEmpty || segments.last != 'ws') {
     segments.add('ws');
   }
-  return uri.replace(scheme: scheme, pathSegments: segments).removeFragment().toString();
+  return uri
+      .replace(scheme: scheme, pathSegments: segments)
+      .removeFragment()
+      .toString();
 }

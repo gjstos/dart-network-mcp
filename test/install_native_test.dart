@@ -28,7 +28,8 @@ void main() {
         ['install.sh', '--claude', '--cursor'],
         environment: env,
       );
-      expect(install.exitCode, 0, reason: '${install.stdout}\n${install.stderr}');
+      expect(install.exitCode, 0,
+          reason: '${install.stdout}\n${install.stderr}');
 
       final exe = '$binDir/dart_network_mcp';
       expect(File(exe).existsSync(), isTrue);
@@ -36,9 +37,8 @@ void main() {
         '${home.path}/.claude.json',
         '${home.path}/.cursor/mcp.json',
       ]) {
-        final servers =
-            (jsonDecode(File(config).readAsStringSync()) as Map)['mcpServers']
-                as Map;
+        final servers = (jsonDecode(File(config).readAsStringSync())
+            as Map)['mcpServers'] as Map;
         expect((servers['dart-network-mcp'] as Map)['command'], exe);
       }
       expect(
@@ -68,7 +68,8 @@ void main() {
               const Duration(seconds: 20),
             ),
       ) as Map;
-      expect((reply['result'] as Map)['serverInfo'], containsPair('name', 'dart-network-mcp'));
+      expect((reply['result'] as Map)['serverInfo'],
+          containsPair('name', 'dart-network-mcp'));
 
       await server.stdin.close();
       expect(

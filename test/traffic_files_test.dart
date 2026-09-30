@@ -32,7 +32,8 @@ void main() {
     expect(File(written.responseBodyPath!).readAsBytesSync(), [1, 2, 3]);
     expect(written.requestBodySize, 0);
     expect(written.responseBodySize, 3);
-    expect(files.readHeaders(written.headersPath).responseHeaders['set-cookie'], 'a=b');
+    expect(files.readHeaders(written.headersPath).responseHeaders['set-cookie'],
+        'a=b');
   });
 
   test('omits a body file when that side is null', () {
@@ -58,7 +59,9 @@ void main() {
     expect(result.responseHeaders, isEmpty);
   });
 
-  test('readHeaders returns empty maps when the headers file contains invalid JSON', () {
+  test(
+      'readHeaders returns empty maps when the headers file contains invalid JSON',
+      () {
     final files = TrafficFiles(temp.path);
     final badFile = '${temp.path}/bad.headers.json';
     File(badFile).writeAsStringSync('not-valid-json{{{');
@@ -67,7 +70,9 @@ void main() {
     expect(result.responseHeaders, isEmpty);
   });
 
-  test('rewrite keeps one file and delete removes the session directory and exports', () {
+  test(
+      'rewrite keeps one file and delete removes the session directory and exports',
+      () {
     final files = TrafficFiles(temp.path);
     files.write(
       vmUri: 'ws://vm/ws',
@@ -100,13 +105,16 @@ void main() {
     files.deleteSessionFiles('ws://vm/ws');
     files.deleteExportFiles('ws://vm/ws');
 
-    expect(Directory(files.sessionDirectory('ws://vm/ws')).existsSync(), isFalse);
     expect(
-      File('${exportDir.path}/dart_network_mcp_20260101T000000_$hash8.har').existsSync(),
+        Directory(files.sessionDirectory('ws://vm/ws')).existsSync(), isFalse);
+    expect(
+      File('${exportDir.path}/dart_network_mcp_20260101T000000_$hash8.har')
+          .existsSync(),
       isFalse,
     );
     expect(
-      File('${exportDir.path}/dart_network_mcp_20260101T000000_other.har').existsSync(),
+      File('${exportDir.path}/dart_network_mcp_20260101T000000_other.har')
+          .existsSync(),
       isTrue,
     );
   });

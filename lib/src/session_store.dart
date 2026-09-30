@@ -119,7 +119,8 @@ CREATE TABLE IF NOT EXISTS sessions (
     _migrateRequestsIfNeeded(db, fileStore);
     db.execute(_requestsTableSql);
     db.execute('CREATE TABLE IF NOT EXISTS retention (days INTEGER NOT NULL)');
-    final retentionCount = db.select('SELECT COUNT(*) AS c FROM retention').first['c'] as int;
+    final retentionCount =
+        db.select('SELECT COUNT(*) AS c FROM retention').first['c'] as int;
     if (retentionCount == 0) {
       db.execute('INSERT INTO retention(days) VALUES (90)');
     }
@@ -152,7 +153,8 @@ INSERT INTO requests_new (
             requestId: row['request_id']! as String,
             startTime: row['start_time']! as int,
             requestHeaders: _decodeStringMap(row['request_headers']! as String),
-            responseHeaders: _decodeStringMap(row['response_headers']! as String),
+            responseHeaders:
+                _decodeStringMap(row['response_headers']! as String),
             requestBody: _readBlob(row['request_body']),
             responseBody: _readBlob(row['response_body']),
           );
@@ -258,7 +260,8 @@ ON CONFLICT(vm_uri) DO UPDATE SET
         sql = 'SELECT * FROM sessions ORDER BY started_at';
         args = [];
       default:
-        throw ArgumentError.value(state, 'state', 'must be live, history, or all');
+        throw ArgumentError.value(
+            state, 'state', 'must be live, history, or all');
     }
     return _db.select(sql, args).map(_sessionFromRow).toList();
   }
@@ -288,7 +291,8 @@ WHERE vm_uri = ?
   }
 
   int retentionDays() {
-    return _db.select('SELECT days FROM retention LIMIT 1').first['days'] as int;
+    return _db.select('SELECT days FROM retention LIMIT 1').first['days']
+        as int;
   }
 
   void setRetentionDays(int days) {
@@ -421,7 +425,8 @@ LIMIT ? OFFSET ?
       urlContains: urlContains,
     );
     return _db
-        .select('SELECT COUNT(*) AS c FROM requests WHERE ${filter.where}', filter.args)
+        .select('SELECT COUNT(*) AS c FROM requests WHERE ${filter.where}',
+            filter.args)
         .first['c']! as int;
   }
 

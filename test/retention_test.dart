@@ -15,7 +15,8 @@ void main() {
   setUp(() {
     tempDir = Directory.systemTemp.createTempSync('dart-network-mcp-retention');
     dataDir = tempDir.path;
-    store = SessionStore.open('$dataDir/network.sqlite', dataDirectory: dataDir);
+    store =
+        SessionStore.open('$dataDir/network.sqlite', dataDirectory: dataDir);
     mcp = DartNetworkMcp(store: store, dataDirectory: dataDir);
   });
 
@@ -57,11 +58,13 @@ void main() {
     expect(mcp.getRetention()['retentionDays'], 90);
   });
 
-  test('sweep deletes history older than the configured days and keeps live', () {
+  test('sweep deletes history older than the configured days and keeps live',
+      () {
     final day = 24 * 60 * 60 * 1000000;
     mcp.setRetention(1);
 
-    store.upsertSession(historySession(vmUri: 'ws://old/ws', disconnectedAt: 1));
+    store
+        .upsertSession(historySession(vmUri: 'ws://old/ws', disconnectedAt: 1));
     store.upsertSession(
       historySession(vmUri: 'ws://new/ws', disconnectedAt: 10 * day),
     );

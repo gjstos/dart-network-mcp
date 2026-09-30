@@ -116,9 +116,7 @@ Map<String, Object?> _harResponse(ExportableRequest request) {
 }
 
 List<Map<String, String>> _harHeaders(Map<String, String> headers) {
-  return headers.entries
-      .map((e) => {'name': e.key, 'value': e.value})
-      .toList();
+  return headers.entries.map((e) => {'name': e.key, 'value': e.value}).toList();
 }
 
 Map<String, Object?> _harContent(

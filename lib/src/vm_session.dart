@@ -18,6 +18,7 @@ String? _packageNameFromRootLib(String? uri) {
   }
   return rest.substring(0, slash);
 }
+
 /// Service RPCs share the app's event loop and were seen taking 10s on a busy
 /// Flutter app, so this is generous; a hung socket is caught by `onDone`.
 const Duration _defaultRpcTimeout = Duration(seconds: 20);
@@ -332,7 +333,8 @@ class VmSession {
     HttpProfileRequest? full;
     var bodyUnavailable = false;
     try {
-      full = await _rpc(() => _service.getHttpProfileRequest(isolateId, ref.id));
+      full =
+          await _rpc(() => _service.getHttpProfileRequest(isolateId, ref.id));
     } on TimeoutException {
       bodyUnavailable = true;
       full = null;

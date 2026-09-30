@@ -29,7 +29,8 @@ void main() {
     );
   }
 
-  test('devtools request contains the full body loaded for that request only', () {
+  test('devtools request contains the full body loaded for that request only',
+      () {
     final request = devToolsRequest(
       ExportableRequest(
         vmUri: 'ws://vm',
