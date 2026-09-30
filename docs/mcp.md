@@ -69,7 +69,7 @@ export_har / export_devtools_json
 ```
 
 1. Suba o app em debug (não-web se for usar o profiler `dart:io`).
-2. A descoberta interna roda a cada 2s e anexa URIs novas. Ordem das fontes de DTD: env `DTD_URI`; arquivos em `…/Dart/dtd/<pid>` (campo `wsUri`, path macOS `~/Library/Application Support/Dart/dtd`, override `DART_NETWORK_MCP_DTD_DIR`); depois `~/.dart-tool` (legado, nomes com `dtd` / `tooling-daemon`). O servidor mantém conexão com **todos** os DTDs encontrados (ex.: IDE e `flutter run`). No Docker o install monta o dir moderno e reescreve loopback do DTD para `host.docker.internal`. Se ainda faltar sessão, chame `attach_vm` com a URI do console (`http://…` ou `ws://…/ws`).
+2. A descoberta interna roda a cada 2s e anexa URIs novas. Ordem das fontes de DTD: env `DTD_URI`; arquivos em `…/Dart/dtd/<pid>` (campo `wsUri`, path macOS `~/Library/Application Support/Dart/dtd`, override `DART_NETWORK_MCP_DTD_DIR`); depois `~/.dart-tool` (legado, nomes com `dtd` / `tooling-daemon`). O servidor mantém conexão com **todos** os DTDs encontrados (ex.: IDE e `flutter run`). No Docker o install monta o dir moderno, reescreve loopback para `host.docker.internal` e disca o IPv4 desse nome. O IPv6 que o Docker publica para o mesmo nome não tem rota no container (`errno 101`). Se ainda faltar sessão, chame `attach_vm` com a URI do console (`http://…` ou `ws://…/ws`).
 3. Consulte com `list_requests` / `get_request`.
 4. Exporte HAR 1.2 ou o snapshot offline do DevTools.
 

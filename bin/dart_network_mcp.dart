@@ -89,7 +89,10 @@ String? _pickVmUriField(Map<String, Object?> session) {
 Future<bool> _vmSocketOpen(String rawUri, {required bool inDocker}) async {
   try {
     final canonical = canonicalizeVmUri(rawUri);
-    final socketUri = socketUriFor(Uri.parse(canonical), inDocker: inDocker);
+    final socketUri = await dialUriFor(
+      Uri.parse(canonical),
+      inDocker: inDocker,
+    );
     final service = await vmServiceConnectUri(socketUri.toString()).timeout(
       const Duration(seconds: 2),
     );
@@ -164,6 +167,7 @@ class _DtdDiscovery {
   final String dataDirectory;
 
   final Map<String, _DtdConnection> _connections = {};
+  Set<String> _discovered = {};
   late final Directory _emptyDartToolDir;
 
   void start() {
@@ -210,6 +214,15 @@ class _DtdDiscovery {
         dartToolDir: _dartToolDirectory(),
       );
       final wanted = uris.toSet();
+      if (wanted.length != _discovered.length ||
+          !wanted.containsAll(_discovered)) {
+        _discovered = wanted;
+        _log(
+          uris.isEmpty
+              ? 'DTD discovery: (none)'
+              : 'DTD discovery: ${uris.join(' ')}',
+        );
+      }
       for (final uri in _connections.keys.toList()) {
         if (!wanted.contains(uri)) {
           await _drop(uri);
@@ -229,8 +242,10 @@ class _DtdDiscovery {
   }
 
   Future<bool> _tryConnect(String wsUri) async {
+    Uri? dialed;
     try {
-      final socket = socketUriFor(Uri.parse(wsUri), inDocker: inDocker);
+      final socket = await dialUriFor(Uri.parse(wsUri), inDocker: inDocker);
+      dialed = socket;
       final client = await DartToolingDaemon.connect(socket);
       await client.streamListen(ConnectedAppServiceConstants.serviceName);
       final events = client.onVmServiceUpdate().listen(
@@ -248,7 +263,7 @@ class _DtdDiscovery {
       await _syncVmUris(client);
       return true;
     } catch (e) {
-      _log('DTD connect failed for $wsUri: $e');
+      _log('DTD connect failed for $wsUri via ${dialed ?? wsUri}: $e');
       return false;
     }
   }

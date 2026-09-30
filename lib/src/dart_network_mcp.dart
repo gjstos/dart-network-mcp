@@ -108,7 +108,7 @@ class DartNetworkMcp {
     }
 
     final beforeAttach = store.getSession(canonical);
-    final socketUri = socketUriFor(Uri.parse(canonical), inDocker: inDocker);
+    final socketUri = await dialUriFor(Uri.parse(canonical), inDocker: inDocker);
     VmSession? session;
     try {
       session = await VmSession.attach(

@@ -1,3 +1,5 @@
+import 'dart:io';
+
 String canonicalizeVmUri(String raw) {
   final uri = Uri.parse(raw.trim());
   final scheme = switch (uri.scheme) {
@@ -24,4 +26,27 @@ Uri socketUriFor(Uri canonical, {required bool inDocker}) {
     return canonical;
   }
   return canonical.replace(host: 'host.docker.internal');
+}
+
+typedef Ipv4Lookup = Future<List<InternetAddress>> Function(String host);
+
+Future<Uri> dialUriFor(
+  Uri canonical, {
+  required bool inDocker,
+  Ipv4Lookup? lookupIpv4,
+}) async {
+  final socket = socketUriFor(canonical, inDocker: inDocker);
+  if (socket.host != 'host.docker.internal') {
+    return socket;
+  }
+  final lookup = lookupIpv4 ?? _lookupIpv4;
+  final addresses = await lookup(socket.host);
+  if (addresses.isEmpty) {
+    return socket;
+  }
+  return socket.replace(host: addresses.first.address);
+}
+
+Future<List<InternetAddress>> _lookupIpv4(String host) {
+  return InternetAddress.lookup(host, type: InternetAddressType.IPv4);
 }
