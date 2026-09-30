@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Poll list_sessions via the same entrypoint install registers (run_mcp_container.sh)."""
+"""Poll list_sessions on a throwaway server process (own data dir, never the installed DB)."""
 
 from __future__ import annotations
 
@@ -9,17 +9,18 @@ import os
 import signal
 import subprocess
 import sys
+import tempfile
 import threading
 import time
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
-RUN_SCRIPT = ROOT / "tool" / "run_mcp_container.sh"
+SERVER = ROOT / "bin" / "dart_network_mcp.dart"
 
 
 def main() -> int:
     parser = argparse.ArgumentParser(
-        description="Watch list_sessions through install's Docker MCP entrypoint",
+        description="Watch list_sessions through a native server started from this checkout",
     )
     parser.add_argument(
         "-i",
@@ -36,19 +37,20 @@ def main() -> int:
     )
     args = parser.parse_args()
 
-    if not RUN_SCRIPT.is_file():
-        print(f"missing {RUN_SCRIPT}", file=sys.stderr)
+    if not SERVER.is_file():
+        print(f"missing {SERVER}", file=sys.stderr)
         return 2
 
     env = os.environ.copy()
     env.pop("DTD_URI", None)
+    env["DART_NETWORK_MCP_DATA"] = tempfile.mkdtemp(prefix="dart_network_mcp_watch_")
 
     print(
-        f"[watch] starting {RUN_SCRIPT} (no DTD_URI); poll every {args.interval}s state={args.state}",
+        f"[watch] starting {SERVER} (no DTD_URI, data={env['DART_NETWORK_MCP_DATA']}); poll every {args.interval}s state={args.state}",
         flush=True,
     )
     proc = subprocess.Popen(
-        ["bash", str(RUN_SCRIPT)],
+        ["dart", "run", str(SERVER)],
         stdin=subprocess.PIPE,
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,

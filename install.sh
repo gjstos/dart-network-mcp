@@ -58,25 +58,6 @@ is_windows_msys() {
   esac
 }
 
-resolve_dart_dtd_dir() {
-  if [[ -n "${DART_NETWORK_MCP_DTD_DIR:-}" ]]; then
-    printf '%s' "$DART_NETWORK_MCP_DTD_DIR"
-    return
-  fi
-  if is_windows_msys; then
-    printf '%s' "${LOCALAPPDATA:-$home/AppData/Local}/Dart/dtd"
-    return
-  fi
-  case "$(uname -s 2>/dev/null || true)" in
-    Darwin)
-      printf '%s' "$home/Library/Application Support/Dart/dtd"
-      ;;
-    *)
-      printf '%s' "${XDG_DATA_HOME:-$home/.local/share}/Dart/dtd"
-      ;;
-  esac
-}
-
 data_dir="$(resolve_data_dir)"
 
 remove_server_data_dir() {
@@ -101,7 +82,16 @@ strip_agent_config() {
   fi
 }
 
+# The server used to ship as a Docker image; clear what older installs left.
+# The profile lives in docker's own config, so it goes even with the daemon
+# off; containers and images need the daemon.
 fresh_clean_docker() {
+  command -v docker >/dev/null 2>&1 || return 0
+  docker mcp profile remove dart-network-mcp >/dev/null 2>&1 || true
+  if ! docker info >/dev/null 2>&1; then
+    echo "Docker is not running: old dart-network-mcp images/containers were left in place." >&2
+    return 0
+  fi
   local id image
   local ids
   local -a drop=()
@@ -118,7 +108,6 @@ fresh_clean_docker() {
     fi
   fi
   docker rmi dart-network-mcp:local dart-vm-mcp:local >/dev/null 2>&1 || true
-  docker mcp profile remove dart-network-mcp >/dev/null 2>&1 || true
 }
 
 if $INSTALL_FRESH; then
@@ -134,12 +123,14 @@ if $INSTALL_FRESH; then
   fi
 fi
 
-dart_tool_dir="$home/.dart-tool"
-dart_dtd_dir="$(resolve_dart_dtd_dir)"
-catalog_dir="$home/.docker/mcp/catalogs"
-catalog_file="$catalog_dir/dart-network-mcp.yaml"
+bin_dir="${DART_NETWORK_MCP_BIN_DIR:-$home/.local/bin}"
+bin_name="dart_network_mcp"
+if is_windows_msys; then
+  bin_name="dart_network_mcp.exe"
+fi
+bin_path="$bin_dir/$bin_name"
 
-mkdir -p "$data_dir" "$dart_tool_dir" "$dart_dtd_dir" "$catalog_dir"
+mkdir -p "$data_dir" "$bin_dir"
 
 if is_windows_msys; then
   if command -v icacls >/dev/null 2>&1 && [[ -n "${USERNAME:-}" ]]; then
@@ -149,99 +140,21 @@ else
   chmod 700 "$data_dir"
 fi
 
-dart_tool_vol="$dart_tool_dir:/home/mcp/.dart-tool:ro"
-dart_dtd_vol="$dart_dtd_dir:/home/mcp/Dart/dtd:ro"
-data_vol="$data_dir:/data:rw"
-
-write_catalog() {
-  local extra_hosts_block=""
-  if [[ -z "${DART_NETWORK_MCP_INSTALL_SKIP_DOCKER:-}" ]]; then
-    if ! docker run --rm alpine getent hosts host.docker.internal >/dev/null 2>&1; then
-      extra_hosts_block=$'extraHosts: ["host.docker.internal:host-gateway"]\n'
-    fi
-  fi
-
-  local user_block=""
-  if ! is_windows_msys; then
-    user_block=$'user: "'$(id -u):$(id -g)$'"\n'
-  fi
-
-  cat >"$catalog_file" <<EOF
-name: dart-network-mcp
-title: Dart VM Network
-description: HTTP profile of running Dart and Flutter VMs.
-type: server
-image: dart-network-mcp:local
-longLived: true
-volumes:
-  - $dart_tool_vol
-  - $dart_dtd_vol
-  - $data_vol
-env:
-  - name: HOME
-    value: /home/mcp
-  - name: DART_NETWORK_MCP_DATA
-    value: /data
-  - name: DART_NETWORK_MCP_IN_DOCKER
-    value: "1"
-  - name: DART_NETWORK_MCP_DTD_DIR
-    value: /home/mcp/Dart/dtd
-tools:
-  - name: list_sessions
-    description: List VM sessions
-  - name: get_session
-    description: Get one VM session
-  - name: attach_vm
-    description: Attach to a VM by URI
-  - name: list_requests
-    description: List HTTP calls for a session
-  - name: get_request
-    description: Get one HTTP profile request
-  - name: export_har
-    description: Export session traffic as HAR
-  - name: export_devtools_json
-    description: Export session traffic as DevTools JSON
-  - name: delete_session
-    description: Delete a session and its stored requests
-  - name: get_retention
-    description: Return the session retention period in days
-  - name: set_retention
-    description: Set the session retention period in days
-${user_block}${extra_hosts_block}
-EOF
-}
-
-write_catalog
-
-ensure_docker_mcp_profile() {
-  if docker mcp profile show dart-network-mcp >/dev/null 2>&1; then
-    docker mcp profile server add dart-network-mcp --server file://dart-network-mcp.yaml
-    return
-  fi
-  if docker mcp profile create --name dart-network-mcp --id dart-network-mcp --server file://dart-network-mcp.yaml; then
-    return
-  fi
-  if docker mcp profile show dart-network-mcp >/dev/null 2>&1; then
-    docker mcp profile server add dart-network-mcp --server file://dart-network-mcp.yaml
-    return
-  fi
-  echo "Failed to create or update docker mcp profile dart-network-mcp" >&2
-  exit 1
-}
-
-if [[ -z "${DART_NETWORK_MCP_INSTALL_SKIP_DOCKER:-}" ]]; then
-  docker build -t dart-network-mcp:local "$SCRIPT_DIR"
-  ensure_docker_mcp_profile
+if [[ -z "${DART_NETWORK_MCP_INSTALL_SKIP_BUILD:-}" ]]; then
+  (
+    cd "$SCRIPT_DIR"
+    dart compile exe bin/dart_network_mcp.dart -o "$bin_path"
+  )
 fi
 
-export INSTALL_RUN_SCRIPT="$SCRIPT_DIR/tool/run_mcp_container.sh"
+export INSTALL_BIN_PATH="$bin_path"
 
 client_entry_json() {
   python3 - <<'PY'
 import json
 import os
 
-print(json.dumps({"command": os.environ["INSTALL_RUN_SCRIPT"], "args": []}))
+print(json.dumps({"command": os.environ["INSTALL_BIN_PATH"], "args": []}))
 PY
 }
 

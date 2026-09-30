@@ -4,6 +4,7 @@ import 'package:dart_network_mcp/src/discovery.dart';
 import 'package:test/test.dart';
 
 void main() {
+  devToolsProbeTests();
   test('env, dtd files, and no recursion', () {
     final dir = Directory.systemTemp.createTempSync('dtd');
     addTearDown(() => dir.deleteSync(recursive: true));
@@ -138,5 +139,56 @@ void main() {
       operatingSystem: 'windows',
     );
     expect(dir.path, r'C:\Users\me\AppData\Local\Dart\dtd');
+  });
+}
+
+void devToolsProbeTests() {
+  group('probeDevToolsDtdUris', () {
+    late HttpServer server;
+
+    setUp(() async {
+      server = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
+      server.listen((req) {
+        if (req.uri.path == '/api/getDtdUri') {
+          req.response.write('{"dtdUri":"ws://127.0.0.1:60831/abc="}');
+        } else {
+          req.response.statusCode = 404;
+        }
+        req.response.close();
+      });
+    });
+    tearDown(() => server.close(force: true));
+
+    test('reads dtdUri from live devtools servers and skips closed ports',
+        () async {
+      final closed = await (() async {
+        final s = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
+        final port = s.port;
+        await s.close();
+        return port;
+      })();
+
+      expect(
+        await probeDevToolsDtdUris(
+          host: '127.0.0.1',
+          ports: [closed, server.port],
+        ),
+        ['ws://127.0.0.1:60831/abc='],
+      );
+    });
+
+    test('ignores non-ws or malformed responses', () async {
+      final bad = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
+      addTearDown(() => bad.close(force: true));
+      bad.listen((req) {
+        req.response.write('{"dtdUri":"http://x/"}');
+        req.response.close();
+      });
+
+      expect(
+        await probeDevToolsDtdUris(host: '127.0.0.1', ports: [bad.port]),
+        isEmpty,
+      );
+    });
   });
 }

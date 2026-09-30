@@ -357,10 +357,8 @@ ON CONFLICT(vm_uri, request_id, start_time) DO UPDATE SET
     }
   }
 
-  List<RequestRecord> listRequests({
+  ({String where, List<Object?> args}) _requestFilter({
     required String vmUri,
-    int limit = 50,
-    int offset = 0,
     String? method,
     int? status,
     String? urlContains,
@@ -380,15 +378,51 @@ ON CONFLICT(vm_uri, request_id, start_time) DO UPDATE SET
       conditions.add('uri LIKE ? ESCAPE \'\\\'');
       args.add('%${_escapeLike(urlContains)}%');
     }
+    return (where: conditions.join(' AND '), args: args);
+  }
 
-    args.addAll([limit, offset]);
+  List<RequestRecord> listRequests({
+    required String vmUri,
+    int limit = 50,
+    int offset = 0,
+    String? method,
+    int? status,
+    String? urlContains,
+  }) {
+    final filter = _requestFilter(
+      vmUri: vmUri,
+      method: method,
+      status: status,
+      urlContains: urlContains,
+    );
     final sql = '''
 SELECT * FROM requests
-WHERE ${conditions.join(' AND ')}
+WHERE ${filter.where}
 ORDER BY start_time ASC
 LIMIT ? OFFSET ?
 ''';
-    return _db.select(sql, args).map(_requestFromRow).toList();
+    return _db
+        .select(sql, [...filter.args, limit, offset])
+        .map(_requestFromRow)
+        .toList();
+  }
+
+  /// Rows matching the same filters as [listRequests], ignoring paging.
+  int countRequests({
+    required String vmUri,
+    String? method,
+    int? status,
+    String? urlContains,
+  }) {
+    final filter = _requestFilter(
+      vmUri: vmUri,
+      method: method,
+      status: status,
+      urlContains: urlContains,
+    );
+    return _db
+        .select('SELECT COUNT(*) AS c FROM requests WHERE ${filter.where}', filter.args)
+        .first['c']! as int;
   }
 
   List<RequestRecord> findByRequestId({

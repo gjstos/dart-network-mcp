@@ -15,24 +15,23 @@ bash install.sh --claude --cursor # os dois
 bash install.sh --fresh --claude --cursor
 ```
 
-`--fresh` roda antes do install. Limpa os dois agentes (Claude e Cursor), o diretório de dados, os catálogos `dart-network-mcp.yaml` e `dart-vm-mcp.yaml`, o profile Docker e os containers e imagens `dart-network-mcp:local` e `dart-vm-mcp:local`, inclusive containers ainda em execução. Outros servidores MCP ficam no JSON. A instalação seguinte vale só para as flags `--claude` / `--cursor` passadas junto.
+`--fresh` roda antes do install. Limpa os dois agentes (Claude e Cursor) e o diretório de dados. Se o Docker estiver disponível, também remove resquícios de instalações antigas: catálogos `dart-network-mcp.yaml` e `dart-vm-mcp.yaml`, o profile Docker e os containers e imagens `dart-network-mcp:local` e `dart-vm-mcp:local`. Outros servidores MCP ficam no JSON. A instalação seguinte vale só para as flags `--claude` / `--cursor` passadas junto.
 
 Pelo menos uma flag é obrigatória. O script:
 
-1. constrói a imagem `dart-network-mcp:local` (salvo `DART_NETWORK_MCP_INSTALL_SKIP_DOCKER=1`);
-2. grava o catálogo e o profile Docker MCP `dart-network-mcp`. O YAML declara `tools` (nome e descrição de cada tool) para a aba Tools do profile no Docker Desktop listar o que dá para ativar e desativar;
-3. mescla a entrada `dart-network-mcp` no cliente e tira a entrada antiga `dart-vm-mcp`. Não altera `MCP_DOCKER` nem outros servidores.
+1. compila o servidor com `dart compile exe` para `$DART_NETWORK_MCP_BIN_DIR` (padrão `~/.local/bin/dart_network_mcp`; salvo `DART_NETWORK_MCP_INSTALL_SKIP_BUILD=1`);
+2. mescla a entrada `dart-network-mcp` no cliente e tira a entrada antiga `dart-vm-mcp`. Não altera outros servidores.
 
-Entrada do cliente: o install aponta para `tool/run_mcp_container.sh`. Cada cliente sobe o próprio container com `--rm`. O script só apaga containers já parados dessas imagens, para um segundo start (Cursor e Claude ao mesmo tempo) não derrubar a sessão que acabou de responder.
+Entrada do cliente: o install aponta direto para o binário. Cada cliente sobe o próprio processo, que sai quando o cliente fecha o stdin.
 
 ```json
 {
-  "command": "<repo>/tool/run_mcp_container.sh",
+  "command": "<home>/.local/bin/dart_network_mcp",
   "args": []
 }
 ```
 
-O servidor é **long-lived**. O script faz `docker run -i` (não `docker mcp gateway`): no Docker Desktop o gateway costuma falhar ao usar `unix:///var/run/docker.sock`. Chamadas one-shot mal observam o poll de 1s do HTTP profile.
+O servidor é **long-lived** enquanto o cliente está aberto. Chamadas one-shot mal observam o poll de 1s do HTTP profile. O SQLite vem do sistema (macOS já traz; em Linux instale `libsqlite3`). Sem Docker, o processo fala com a VM e o DTD em `127.0.0.1` do próprio host.
 
 ## Dados e privacidade
 
@@ -44,7 +43,7 @@ Diretório de dados:
 | 2 | `%LOCALAPPDATA%\dart-network-mcp` (se `LOCALAPPDATA` existir) |
 | 3 | `~/.local/share/dart-network-mcp` |
 
-No container: `DART_NETWORK_MCP_DATA=/data`. SQLite em `network.sqlite`; bodies e headers em `bodies/`; exports em `exports/`.
+SQLite em `network.sqlite`; bodies e headers em `bodies/`; exports em `exports/`.
 
 O SQLite guarda só metadados curtos. Headers e bodies completos (`Authorization`, cookies, etc.) ficam em arquivo. Trate o diretório de dados como credenciais. No Unix o diretório fica `0700` e o arquivo `0600`.
 
@@ -69,7 +68,7 @@ export_har / export_devtools_json
 ```
 
 1. Suba o app em debug (não-web se for usar o profiler `dart:io`).
-2. A descoberta interna roda a cada 2s e anexa URIs novas. Ordem das fontes de DTD: env `DTD_URI`; arquivos em `…/Dart/dtd/<pid>` (campo `wsUri`, path macOS `~/Library/Application Support/Dart/dtd`, override `DART_NETWORK_MCP_DTD_DIR`); depois `~/.dart-tool` (legado, nomes com `dtd` / `tooling-daemon`). O servidor mantém conexão com **todos** os DTDs encontrados (ex.: IDE e `flutter run`). No Docker o install monta o dir moderno, reescreve loopback para `host.docker.internal` e disca o IPv4 desse nome. O IPv6 que o Docker publica para o mesmo nome não tem rota no container (`errno 101`). Se ainda faltar sessão, chame `attach_vm` com a URI do console (`http://…` ou `ws://…/ws`).
+2. A descoberta interna roda a cada 2s e anexa URIs novas. Fontes de DTD: env `DTD_URI`; servidores DevTools em `127.0.0.1:9100–9119` (`GET /api/getDtdUri`, é a única que cobre qualquer origem, pois `dart tooling-daemon --machine` do VS Code não grava arquivo); arquivos em `…/Dart/dtd/<pid>` (campo `wsUri`, path macOS `~/Library/Application Support/Dart/dtd`, override `DART_NETWORK_MCP_DTD_DIR`); depois `~/.dart-tool` (legado). O servidor mantém conexão com **todos** os DTDs encontrados (ex.: IDE e `flutter run`). Em cada DTD as VMs vêm de `getVmServices` e de `Editor.getDebugSessions` (o do VS Code só responde a segunda), cada uma com limite de 5s. Se ainda faltar sessão, chame `attach_vm` com a URI do console (`http://…` ou `ws://…/ws`).
 3. Consulte com `list_requests` / `get_request`.
 4. Exporte HAR 1.2 ou o snapshot offline do DevTools.
 
@@ -223,8 +222,6 @@ Sucesso:
 - Sessão `history` cujo socket volta: passa a `live` e mantém as linhas.
 - Falha de conexão: `attach_failed` (não cria linha).
 
-Dentro do container, host loopback na URI vira `host.docker.internal` **só no socket**; a chave canônica continua com `127.0.0.1` / `localhost`.
-
 ```mermaid
 classDiagram
   class AttachInput {
@@ -253,7 +250,6 @@ flowchart TB
   end
   subgraph tratamento [Tratamento]
     t1["canonicaliza a chave vmUri"]
-    t2["loopback no container só muda o socket"]
     t3{"já existe sessão live?"}
     t4["devolve a sessão, sem segundo socket"]
     t5["conecta, getVM, nome do pacote em package:"]
@@ -263,7 +259,7 @@ flowchart TB
   subgraph saida [Saída]
     s1["vmUri, state, appName, httpProfileAvailable"]
   end
-  e1 --> t1 --> t2 --> t3
+  e1 --> t1 --> t3
   t3 -->|sim| t4 --> s1
   t3 -->|não| t5 --> t6 --> s1
   t5 -.-> t7
@@ -277,6 +273,10 @@ flowchart TB
 {
   "vmUri": "ws://…",
   "state": "live",
+  "total": 318,
+  "limit": 50,
+  "offset": 0,
+  "nextOffset": 50,
   "requests": [
     {
       "requestId": "1",
@@ -292,6 +292,8 @@ flowchart TB
   ]
 }
 ```
+
+**Paginação:** as requests saem por `startTime` crescente. `total` é a quantidade que casa com os filtros (`method`, `status`, `urlContains`), ignorando o paging. `limit` é o valor efetivamente aplicado (após o teto de 200). Para ler a sessão inteira, repita a chamada com `offset = nextOffset` até `nextOffset` vir `null`.
 
 Não inclui headers, body nem path. A listagem não abre `headers.json` nem os arquivos de body. `requestBodySize`, `responseBodySize` e `bodyUnavailable` entram sempre; os sizes usam 0 quando não há bytes. `durationMs` fica de fora quando não há `endTime`. `error` fica de fora quando é nulo.
 

@@ -23,7 +23,7 @@ Future<void> main(List<String> args) async {
   }
 
   try {
-    final attach = await mcp.attachVm(vmUri, inDocker: false);
+    final attach = await mcp.attachVm(vmUri);
     check(
       'attach_vm',
       attach['state'] == 'live' && attach['error'] == null,

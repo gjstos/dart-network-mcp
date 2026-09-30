@@ -50,11 +50,10 @@ Future<void> _ensureDataDirectory(String dataDir) async {
 Future<void> _recoverLiveSessions({
   required DartNetworkMcp mcp,
   required SessionStore store,
-  required bool inDocker,
 }) async {
   final now = DateTime.now().microsecondsSinceEpoch;
   for (final session in store.listSessions('live')) {
-    final result = await mcp.attachVm(session.vmUri, inDocker: inDocker);
+    final result = await mcp.attachVm(session.vmUri);
     if (!result.containsKey('error')) {
       continue;
     }
@@ -86,14 +85,10 @@ String? _pickVmUriField(Map<String, Object?> session) {
   return null;
 }
 
-Future<bool> _vmSocketOpen(String rawUri, {required bool inDocker}) async {
+Future<bool> _vmSocketOpen(String rawUri) async {
   try {
     final canonical = canonicalizeVmUri(rawUri);
-    final socketUri = await dialUriFor(
-      Uri.parse(canonical),
-      inDocker: inDocker,
-    );
-    final service = await vmServiceConnectUri(socketUri.toString()).timeout(
+    final service = await vmServiceConnectUri(canonical).timeout(
       const Duration(seconds: 2),
     );
     await service.dispose();
@@ -113,7 +108,7 @@ Future<List<String>> _vmUrisFromConnectedApp(DartToolingDaemon dtd) async {
 
 Future<List<String>> _vmUrisFromEditor(DartToolingDaemon dtd) async {
   final response = await dtd.call('Editor', 'getDebugSessions');
-  final sessions = response.result['sessions'];
+  final sessions = response.result['debugSessions'];
   if (sessions is! List) {
     return [];
   }
@@ -131,16 +126,25 @@ Future<List<String>> _vmUrisFromEditor(DartToolingDaemon dtd) async {
   return uris;
 }
 
+/// DTDs answer differently depending on who owns them: a `flutter run` DTD
+/// lists apps through `getVmServices`, while the VS Code one never replies to
+/// it and only exposes them through `Editor.getDebugSessions`. Ask both, each
+/// with a deadline, and merge.
 Future<List<String>> _discoverVmUris(DartToolingDaemon dtd) async {
-  try {
-    return await _vmUrisFromConnectedApp(dtd);
-  } catch (_) {
+  const deadline = Duration(seconds: 5);
+  Future<List<String>> safely(Future<List<String>> Function() source) async {
     try {
-      return await _vmUrisFromEditor(dtd);
+      return await source().timeout(deadline);
     } catch (_) {
-      return [];
+      return const [];
     }
   }
+
+  final found = await Future.wait([
+    safely(() => _vmUrisFromConnectedApp(dtd)),
+    safely(() => _vmUrisFromEditor(dtd)),
+  ]);
+  return {for (final uris in found) ...uris}.toList();
 }
 
 class _DtdConnection {
@@ -150,20 +154,18 @@ class _DtdConnection {
   });
 
   final DartToolingDaemon client;
-  final StreamSubscription<DTDEvent> events;
+  final StreamSubscription<DTDEvent>? events;
 }
 
 class _DtdDiscovery {
   _DtdDiscovery({
     required this.mcp,
     required this.store,
-    required this.inDocker,
     required this.dataDirectory,
   });
 
   final DartNetworkMcp mcp;
   final SessionStore store;
-  final bool inDocker;
   final String dataDirectory;
 
   final Map<String, _DtdConnection> _connections = {};
@@ -206,13 +208,20 @@ class _DtdDiscovery {
     return dir;
   }
 
+  bool _ticking = false;
+
   Future<void> _tick() async {
+    if (_ticking) return;
+    _ticking = true;
     try {
       final uris = discoverDtdUris(
         dtdUriEnv: Platform.environment['DTD_URI'],
         dartDtdDir: _dartDtdDirectory(),
         dartToolDir: _dartToolDirectory(),
       );
+      for (final uri in await probeDevToolsDtdUris(host: '127.0.0.1')) {
+        if (!uris.contains(uri)) uris.add(uri);
+      }
       final wanted = uris.toSet();
       if (wanted.length != _discovered.length ||
           !wanted.containsAll(_discovered)) {
@@ -238,21 +247,30 @@ class _DtdDiscovery {
       }
     } catch (e, st) {
       _log('DTD discovery error: $e\n$st');
+    } finally {
+      _ticking = false;
     }
   }
 
   Future<bool> _tryConnect(String wsUri) async {
-    Uri? dialed;
     try {
-      final socket = await dialUriFor(Uri.parse(wsUri), inDocker: inDocker);
-      dialed = socket;
-      final client = await DartToolingDaemon.connect(socket);
-      await client.streamListen(ConnectedAppServiceConstants.serviceName);
-      final events = client.onVmServiceUpdate().listen(
-        (event) => unawaited(_onVmServiceEvent(event)),
-        onError: (Object e) => _log('DTD VM event stream error: $e'),
-      );
+      final client = await DartToolingDaemon.connect(Uri.parse(wsUri));
+      // Some DTDs (VS Code's) never answer the ConnectedApp service calls;
+      // polling in `_syncVmUris` still finds their apps, so events are a bonus.
+      StreamSubscription<DTDEvent>? events;
+      try {
+        await client
+            .streamListen(ConnectedAppServiceConstants.serviceName)
+            .timeout(const Duration(seconds: 5));
+        events = client.onVmServiceUpdate().listen(
+          (event) => unawaited(_onVmServiceEvent(event)),
+          onError: (Object e) => _log('DTD VM event stream error: $e'),
+        );
+      } catch (e) {
+        _log('DTD event stream unavailable for $wsUri: $e');
+      }
       _connections[wsUri] = _DtdConnection(client: client, events: events);
+      _log('DTD connected: $wsUri');
       unawaited(
         client.done.whenComplete(() {
           if (_connections[wsUri]?.client == client) {
@@ -263,7 +281,7 @@ class _DtdDiscovery {
       await _syncVmUris(client);
       return true;
     } catch (e) {
-      _log('DTD connect failed for $wsUri via ${dialed ?? wsUri}: $e');
+      _log('DTD connect failed for $wsUri: $e');
       return false;
     }
   }
@@ -273,7 +291,7 @@ class _DtdDiscovery {
     if (conn == null) {
       return;
     }
-    await conn.events.cancel();
+    await conn.events?.cancel();
     try {
       await conn.client.close();
     } catch (_) {}
@@ -282,7 +300,10 @@ class _DtdDiscovery {
   Future<void> _syncVmUris(DartToolingDaemon dtd) async {
     final uris = await _discoverVmUris(dtd);
     for (final uri in uris) {
-      await mcp.attachVm(uri, inDocker: inDocker);
+      final result = await mcp.attachVm(uri);
+      if (result['error'] != null) {
+        _log('attach failed for $uri: ${jsonEncode(result['error'])}');
+      }
     }
   }
 
@@ -291,7 +312,7 @@ class _DtdDiscovery {
       if (event.kind == ConnectedAppServiceConstants.vmServiceRegistered) {
         final uri = event.data[DtdParameters.uri];
         if (uri is String && uri.isNotEmpty) {
-          await mcp.attachVm(uri, inDocker: inDocker);
+          await mcp.attachVm(uri);
         }
         return;
       }
@@ -310,7 +331,7 @@ class _DtdDiscovery {
         if (record == null || record.state != 'live') {
           return;
         }
-        final open = await _vmSocketOpen(raw, inDocker: inDocker);
+        final open = await _vmSocketOpen(raw);
         if (!open) {
           await mcp.disposeLiveSession(canonical);
           store.markHistory(
@@ -326,7 +347,7 @@ class _DtdDiscovery {
   }
 }
 
-void _registerTools(McpServer server, DartNetworkMcp mcp, {required bool inDocker}) {
+void _registerTools(McpServer server, DartNetworkMcp mcp) {
   server.tool(
     'list_sessions',
     description: 'List VM sessions',
@@ -383,14 +404,14 @@ void _registerTools(McpServer server, DartNetworkMcp mcp, {required bool inDocke
       if (uri is! String || uri.isEmpty) {
         return _toolResult(toolError('invalid_params', 'uri is required'));
       }
-      return _toolResult(await mcp.attachVm(uri, inDocker: inDocker));
+      return _toolResult(await mcp.attachVm(uri));
     },
   );
 
   server.tool(
     'list_requests',
     description:
-        'List calls with method, URI, status, duration and bodies. Headers stay on get_request.',
+        'List calls with method, URI, status, duration and bodies. Headers stay on get_request. Paged: limit defaults to 50 (max 200); the result carries total and nextOffset, so pass nextOffset as offset until it is null.',
     toolInputSchema: ToolInputSchema(
       properties: {
         'vmUri': {'type': 'string'},
@@ -545,7 +566,6 @@ void _registerTools(McpServer server, DartNetworkMcp mcp, {required bool inDocke
 
 Future<void> main() async {
   _configureMcpLogging();
-  final inDocker = Platform.environment['DART_NETWORK_MCP_IN_DOCKER'] == '1';
   final dataDir = resolveDataDirectory(Platform.environment);
   await _ensureDataDirectory(dataDir);
 
@@ -566,7 +586,7 @@ Future<void> main() async {
       _log('hourly sweepRetention error (ignored): $e');
     }
   });
-  await _recoverLiveSessions(mcp: mcp, store: store, inDocker: inDocker);
+  await _recoverLiveSessions(mcp: mcp, store: store);
 
   final server = McpServer(
     Implementation(name: 'dart-network-mcp', version: '0.1.0'),
@@ -576,14 +596,22 @@ Future<void> main() async {
       ),
     ),
   );
-  _registerTools(server, mcp, inDocker: inDocker);
+  _registerTools(server, mcp);
 
   _DtdDiscovery(
     mcp: mcp,
     store: store,
-    inDocker: inDocker,
     dataDirectory: dataDir,
   ).start();
 
+  // The client owns this process: once it closes stdin there is nobody left to
+  // serve, so leave instead of lingering on the discovery timers.
+  server.server.onclose = () {
+    try {
+      store.close();
+    } finally {
+      exit(0);
+    }
+  };
   await server.connect(StdioServerTransport());
 }

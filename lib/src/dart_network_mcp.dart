@@ -87,10 +87,7 @@ class DartNetworkMcp {
     });
   }
 
-  Future<Map<String, Object?>> attachVm(
-    String uri, {
-    required bool inDocker,
-  }) async {
+  Future<Map<String, Object?>> attachVm(String uri) async {
     final String canonical;
     try {
       canonical = canonicalizeVmUri(uri);
@@ -108,7 +105,7 @@ class DartNetworkMcp {
     }
 
     final beforeAttach = store.getSession(canonical);
-    final socketUri = await dialUriFor(Uri.parse(canonical), inDocker: inDocker);
+    final socketUri = Uri.parse(canonical);
     VmSession? session;
     try {
       session = await VmSession.attach(
@@ -170,9 +167,20 @@ class DartNetworkMcp {
           )
           .map(_requestListItem)
           .toList();
+      final total = store.countRequests(
+        vmUri: vmUri,
+        method: method,
+        status: status,
+        urlContains: urlContains,
+      );
+      final next = effectiveOffset + requests.length;
       return {
         'vmUri': vmUri,
         'state': record.state,
+        'total': total,
+        'limit': effectiveLimit,
+        'offset': effectiveOffset,
+        'nextOffset': requests.isNotEmpty && next < total ? next : null,
         'requests': requests,
       };
     });

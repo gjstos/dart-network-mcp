@@ -17,6 +17,7 @@ class FakeHttpProfileEntry {
     this.responseHeaders = const {},
     this.requestBody = const [],
     this.responseBody = const [],
+    this.responseComplete = true,
     int? lastModified,
   }) : lastModified = lastModified ?? startTime;
 
@@ -32,6 +33,10 @@ class FakeHttpProfileEntry {
   Map<String, String> responseHeaders;
   List<int> requestBody;
   List<int> responseBody;
+
+  /// `false` models dart:io after the request is sent: `endTime` is set but
+  /// the response has not finished (`response.endTime` absent).
+  bool responseComplete;
   late int lastModified;
 }
 
@@ -42,7 +47,7 @@ class FakeVmService {
     List<String>? extensionRpcs,
   }) : extensionRpcs = extensionRpcs ?? ['ext.flutter.version'];
 
-  final bool httpAvailable;
+  bool httpAvailable;
   final String? rootLibUri;
   final List<String> extensionRpcs;
 
@@ -56,6 +61,10 @@ class FakeVmService {
   bool failNextGetHttpProfileRequest = false;
   bool hangNextGetHttpProfile = false;
   int clearHttpProfileCalls = 0;
+  int getHttpProfileCalls = 0;
+
+  /// Isolates whose `getHttpProfile` fails, like one that just exited.
+  final Set<String> brokenIsolates = {};
 
   late final String consoleHttpUri;
   late final Uri webSocketUri;
@@ -160,6 +169,22 @@ class FakeVmService {
     entry.lastModified = DateTime.now().microsecondsSinceEpoch;
   }
 
+  void completeResponse({
+    required String id,
+    required int startTime,
+    required int statusCode,
+    List<int> responseBody = const [],
+  }) {
+    final entry = _requests.firstWhere(
+      (r) => r.id == id && r.startTime == startTime,
+    );
+    entry
+      ..statusCode = statusCode
+      ..responseBody = responseBody
+      ..responseComplete = true
+      ..lastModified = DateTime.now().microsecondsSinceEpoch;
+  }
+
   Future<void> close() async {
     closeClients();
     await _server.close(force: true);
@@ -243,6 +268,7 @@ class FakeVmService {
         return _getHttpProfileRequest(params);
       case 'ext.dart.io.clearHttpProfile':
         clearHttpProfileCalls++;
+        _requests.removeWhere((r) => r.isolateId == params['isolateId']);
         return {'type': 'Success'};
       default:
         return {'type': 'Success'};
@@ -305,7 +331,11 @@ class FakeVmService {
   }
 
   Map<String, dynamic> _getHttpProfile(Map<String, dynamic> params) {
+    getHttpProfileCalls++;
     final isolateId = params['isolateId'] as String? ?? 'isolates/main';
+    if (brokenIsolates.contains(isolateId)) {
+      throw StateError('isolate $isolateId is gone');
+    }
     if (!_loggingEnabledIsolates.contains(isolateId)) {
       return {
         'type': 'HttpProfile',
@@ -366,7 +396,8 @@ class FakeVmService {
         if (entry.statusCode != null) 'statusCode': entry.statusCode,
         'reasonPhrase': entry.reasonPhrase,
         'headers': entry.responseHeaders,
-        if (entry.endTime != null) 'endTime': entry.endTime,
+        if (entry.endTime != null && entry.responseComplete)
+          'endTime': entry.endTime,
       },
     };
     if (includeBodies) {

@@ -65,7 +65,7 @@ void main() {
       );
 
   Future<String> attachFake(FakeVmService fake) async {
-    final result = await mcp.attachVm(fake.consoleHttpUri, inDocker: false);
+    final result = await mcp.attachVm(fake.consoleHttpUri);
     expect(result['error'], isNull);
     return canonicalizeVmUri(fake.consoleHttpUri);
   }
@@ -136,6 +136,83 @@ void main() {
       expect(item.containsKey('requestHeaders'), isFalse);
       expect(item.containsKey('responseBodyPath'), isFalse);
       expect(files.readCalls, 0);
+    });
+
+    group('listRequests pagination', () {
+      const vmUri = 'ws://127.0.0.1:8181/ws';
+
+      void seed(int count, {int Function(int)? statusFor}) {
+        store.upsertSession(liveSession(vmUri));
+        for (var i = 0; i < count; i++) {
+          store.upsertRequest(
+            RequestRecord(
+              vmUri: vmUri,
+              requestId: 'r$i',
+              isolateId: 'isolates/1',
+              method: 'GET',
+              uri: 'https://example.com/$i',
+              startTime: 1000 + i,
+              endTime: 2000 + i,
+              statusCode: statusFor?.call(i) ?? 200,
+              reasonPhrase: 'OK',
+              headersPath: '',
+              requestBodyPath: null,
+              responseBodyPath: null,
+              requestBodySize: 0,
+              responseBodySize: 0,
+              bodyUnavailable: false,
+              error: null,
+            ),
+          );
+        }
+      }
+
+      test('reports total and nextOffset while more pages remain', () {
+        seed(5);
+        final page = mcp.listRequests(vmUri, limit: 2);
+        expect((page['requests'] as List).length, 2);
+        expect(page['total'], 5);
+        expect(page['limit'], 2);
+        expect(page['offset'], 0);
+        expect(page['nextOffset'], 2);
+      });
+
+      test('following nextOffset walks every request exactly once', () {
+        seed(5);
+        final seen = <String>[];
+        int? offset = 0;
+        while (offset != null) {
+          final page = mcp.listRequests(vmUri, limit: 2, offset: offset);
+          seen.addAll(
+            (page['requests'] as List).map((r) => (r as Map)['requestId'] as String),
+          );
+          offset = page['nextOffset'] as int?;
+        }
+        expect(seen, ['r0', 'r1', 'r2', 'r3', 'r4']);
+      });
+
+      test('last page has no nextOffset', () {
+        seed(5);
+        final page = mcp.listRequests(vmUri, limit: 2, offset: 4);
+        expect((page['requests'] as List).length, 1);
+        expect(page['nextOffset'], isNull);
+        expect(page.containsKey('nextOffset'), isTrue);
+      });
+
+      test('total and paging follow the filters', () {
+        seed(6, statusFor: (i) => i.isEven ? 500 : 200);
+        final page = mcp.listRequests(vmUri, limit: 2, status: 500);
+        expect(page['total'], 3);
+        expect(page['nextOffset'], 2);
+        final rest = mcp.listRequests(vmUri, limit: 2, offset: 2, status: 500);
+        expect((rest['requests'] as List).length, 1);
+        expect(rest['nextOffset'], isNull);
+      });
+
+      test('reports the limit actually applied after clamping', () {
+        seed(1);
+        expect(mcp.listRequests(vmUri, limit: 9999)['limit'], 200);
+      });
     });
 
     test('getRequest inlines a small json body', () {
@@ -285,7 +362,7 @@ void main() {
       final fake = await FakeVmService.start(
         rootLibUri: 'package:dart_network_mcp_example/main.dart',
       );
-      final result = await mcp.attachVm(fake.consoleHttpUri, inDocker: false);
+      final result = await mcp.attachVm(fake.consoleHttpUri);
       expect(result['appName'], 'dart_network_mcp_example');
       await fake.close();
     });
@@ -593,7 +670,7 @@ void main() {
       expect(store.getSession(key)?.state, 'history');
 
       await fake.close();
-      final result = await mcp.attachVm(fake.consoleHttpUri, inDocker: false);
+      final result = await mcp.attachVm(fake.consoleHttpUri);
       expect((result['error'] as Map)['code'], 'attach_failed');
       expect(store.getSession(key)?.state, 'history');
       expect(store.listRequests(vmUri: key).length, 1);

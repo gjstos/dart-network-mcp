@@ -23,7 +23,7 @@ Future<void> main(List<String> args) async {
   }
 
   try {
-    await dump('attach', await mcp.attachVm(vmUri, inDocker: false));
+    await dump('attach', await mcp.attachVm(vmUri));
 
     Map<String, Object?> list({bool history = false, String? url}) {
       return mcp.listRequests(

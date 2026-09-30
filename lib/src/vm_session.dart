@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:io';
 
 import 'package:vm_service/vm_service.dart';
 import 'package:vm_service/vm_service_io.dart';
@@ -17,7 +18,13 @@ String? _packageNameFromRootLib(String? uri) {
   }
   return rest.substring(0, slash);
 }
-const Duration _defaultRpcTimeout = Duration(seconds: 3);
+/// Service RPCs share the app's event loop and were seen taking 10s on a busy
+/// Flutter app, so this is generous; a hung socket is caught by `onDone`.
+const Duration _defaultRpcTimeout = Duration(seconds: 20);
+
+/// A request still open after this long no longer holds back
+/// `clearHttpProfile`, so a hung exchange cannot grow the VM profile forever.
+const Duration _defaultInFlightTimeout = Duration(minutes: 10);
 
 class VmSession {
   VmSession._({
@@ -30,6 +37,7 @@ class VmSession {
     required bool isFlutterApp,
     required bool enableTimer,
     required Duration rpcTimeout,
+    required Duration inFlightTimeout,
     required Set<String> loggingEnabledIsolateIds,
   })  : _service = service,
         _isolateIds = List<String>.from(isolateIds),
@@ -38,6 +46,7 @@ class VmSession {
         _isFlutterApp = isFlutterApp,
         _enableTimer = enableTimer,
         _rpcTimeout = rpcTimeout,
+        _inFlightTimeout = inFlightTimeout,
         _loggingEnabledIsolateIds = loggingEnabledIsolateIds {
     _service.onDone.then((_) {
       if (_disposed) {
@@ -60,15 +69,17 @@ class VmSession {
   final String vmUri;
   final VmService _service;
   final List<String> _isolateIds;
-  final bool _httpProfileAvailable;
-  final bool _loggingEnabled;
+  bool _httpProfileAvailable;
+  bool _loggingEnabled;
   final bool _isFlutterApp;
   final bool _enableTimer;
   final Duration _rpcTimeout;
+  final Duration _inFlightTimeout;
   final Set<String> _loggingEnabledIsolateIds;
   Timer? _pollTimer;
   final Map<String, DateTime> _lastProfileTimestampByIsolate = {};
-  final Map<String, Set<String>> _inFlightByIsolate = {};
+  final Map<String, Map<String, DateTime>> _inFlightByIsolate = {};
+  bool _polling = false;
   bool _disposed = false;
   StreamSubscription<Event>? _isolateEventSub;
 
@@ -81,6 +92,7 @@ class VmSession {
     required Uri socketUri,
     required bool enableTimer,
     Duration rpcTimeout = _defaultRpcTimeout,
+    Duration? inFlightTimeout,
   }) async {
     final vmUri = canonicalizeVmUri(rawUri);
     final service = await vmServiceConnectUri(socketUri.toString());
@@ -141,6 +153,7 @@ class VmSession {
       isFlutterApp: isFlutterApp,
       enableTimer: enableTimer,
       rpcTimeout: rpcTimeout,
+      inFlightTimeout: inFlightTimeout ?? _defaultInFlightTimeout,
       loggingEnabledIsolateIds: loggingEnabledIsolateIds,
     );
     session._listenIsolateStream();
@@ -210,9 +223,10 @@ class VmSession {
   }
 
   Future<void> pollOnce() async {
-    if (!_httpProfileAvailable || _disposed) {
+    if (_disposed || _polling) {
       return;
     }
+    _polling = true;
     try {
       final vm = await _rpc(() => _service.getVM());
       final currentIds = vm.isolates?.map((i) => i.id!).toList() ?? <String>[];
@@ -221,57 +235,100 @@ class VmSession {
         ..addAll(currentIds);
 
       for (final isolateId in List<String>.from(_isolateIds)) {
-        if (!await _rpc(() => _service.isHttpProfilingAvailable(isolateId))) {
-          continue;
-        }
-        if (!_loggingEnabledIsolateIds.contains(isolateId)) {
-          await _rpc(() => _service.httpEnableTimelineLogging(isolateId, true));
-          _loggingEnabledIsolateIds.add(isolateId);
-        }
-        final lastTimestamp = _lastProfileTimestampByIsolate[isolateId];
-        var profile = await _rpc(
-          () => _service.getHttpProfile(
-            isolateId,
-            updatedSince: lastTimestamp,
-          ),
-        );
-        if (lastTimestamp != null &&
-            profile.timestamp.isBefore(lastTimestamp)) {
-          profile = await _rpc(() => _service.getHttpProfile(isolateId));
-        }
-        final inFlight = _inFlightByIsolate[isolateId] ??= {};
-        var anyPersistFailed = false;
-        for (final ref in profile.requests) {
-          if (ref.endTime == null) {
-            inFlight.add(ref.id);
-          } else {
-            inFlight.remove(ref.id);
-          }
-          try {
-            await _persistRequest(isolateId, ref);
-          } catch (_) {
-            anyPersistFailed = true;
-          }
-        }
-        if (!anyPersistFailed) {
-          _lastProfileTimestampByIsolate[isolateId] = profile.timestamp;
-        }
-        if (!anyPersistFailed && inFlight.isEmpty) {
-          try {
-            await _rpc(() => _service.clearHttpProfile(isolateId));
-          } on TimeoutException {
+        try {
+          await _pollIsolate(isolateId);
+        } on TimeoutException {
+          // A busy app answers slowly; retry on the next poll.
+        } on RPCError catch (e) {
+          if (e.code == RPCErrorKind.kConnectionDisposed.code) {
             rethrow;
-          } catch (_) {}
+          }
+          // The isolate went away mid-poll; the others are still fine.
+        } on SentinelException {
+          // Same: isolate collected between getVM and the profile call.
         }
       }
     } on TimeoutException {
+      // Same as above: only `onDone` proves the socket is gone.
+    } catch (e) {
+      stderr.writeln('poll failed, dropping session $vmUri: $e');
       await _handleConnectionFailure();
-    } catch (_) {
-      await _handleConnectionFailure();
+    } finally {
+      _polling = false;
     }
   }
 
-  Future<void> _persistRequest(String isolateId, HttpProfileRequest ref) async {
+  Future<void> _pollIsolate(String isolateId) async {
+    if (!await _rpc(() => _service.isHttpProfilingAvailable(isolateId))) {
+      return;
+    }
+    if (!_httpProfileAvailable) {
+      _httpProfileAvailable = true;
+      _markHttpProfileAvailable();
+    }
+    if (!_loggingEnabledIsolateIds.contains(isolateId)) {
+      await _rpc(() => _service.httpEnableTimelineLogging(isolateId, true));
+      _loggingEnabledIsolateIds.add(isolateId);
+      _loggingEnabled = true;
+    }
+    final lastTimestamp = _lastProfileTimestampByIsolate[isolateId];
+    var profile = await _rpc(
+      () => _service.getHttpProfile(isolateId, updatedSince: lastTimestamp),
+    );
+    if (lastTimestamp != null && profile.timestamp.isBefore(lastTimestamp)) {
+      profile = await _rpc(() => _service.getHttpProfile(isolateId));
+    }
+    final inFlight = _inFlightByIsolate[isolateId] ??= {};
+    var needsRetry = false;
+    for (final ref in profile.requests) {
+      if (_completedAt(ref) == null) {
+        inFlight.putIfAbsent(ref.id, DateTime.now);
+      } else {
+        inFlight.remove(ref.id);
+      }
+      try {
+        if (!await _persistRequest(isolateId, ref)) {
+          needsRetry = true;
+        }
+      } catch (e) {
+        stderr.writeln('persist failed for ${ref.method} ${ref.uri}: $e');
+        needsRetry = true;
+      }
+    }
+    if (!needsRetry) {
+      _lastProfileTimestampByIsolate[isolateId] = profile.timestamp;
+    }
+    final now = DateTime.now();
+    inFlight.removeWhere((_, seen) => now.difference(seen) >= _inFlightTimeout);
+    if (!needsRetry && inFlight.isEmpty) {
+      try {
+        await _rpc(() => _service.clearHttpProfile(isolateId));
+      } catch (_) {}
+    }
+  }
+
+  void _markHttpProfileAvailable() {
+    final record = store.getSession(vmUri);
+    if (record == null) {
+      return;
+    }
+    store.upsertSession(
+      SessionRecord(
+        vmUri: record.vmUri,
+        state: record.state,
+        appName: record.appName,
+        isolateIds: record.isolateIds,
+        startedAt: record.startedAt,
+        disconnectedAt: record.disconnectedAt,
+        disconnectReason: record.disconnectReason,
+        httpProfileAvailable: true,
+      ),
+    );
+  }
+
+  /// Returns `false` when the request body could not be fetched, so the
+  /// caller retries it on the next poll instead of settling for a partial row.
+  Future<bool> _persistRequest(String isolateId, HttpProfileRequest ref) async {
     HttpProfileRequest? full;
     var bodyUnavailable = false;
     try {
@@ -290,20 +347,27 @@ class VmSession {
     final requestHeaders = _stringHeaders(requestData?.headers);
     final responseHeaders = _stringHeaders(responseData?.headers);
 
-    var requestBody = full?.requestBody;
-    var responseBody = full?.responseBody;
-    final requestBodySize = requestBody?.length ?? 0;
-    final responseBodySize = responseBody?.length ?? 0;
+    final requestBody = full?.requestBody;
+    final responseBody = full?.responseBody;
 
+    final startTime = ref.startTime.microsecondsSinceEpoch;
     final written = store.files.write(
       vmUri: vmUri,
       requestId: ref.id,
-      startTime: ref.startTime.microsecondsSinceEpoch,
+      startTime: startTime,
       requestHeaders: requestHeaders,
       responseHeaders: responseHeaders,
       requestBody: requestBody,
       responseBody: responseBody,
     );
+
+    // Without a fresh body fetch, keep what an earlier poll already stored.
+    final prior = bodyUnavailable
+        ? store
+            .findByRequestId(vmUri: vmUri, requestId: ref.id)
+            .where((r) => r.startTime == startTime)
+            .firstOrNull
+        : null;
 
     store.upsertRequest(
       RequestRecord(
@@ -313,18 +377,30 @@ class VmSession {
         method: ref.method,
         uri: ref.uri.toString(),
         startTime: ref.startTime.microsecondsSinceEpoch,
-        endTime: ref.endTime?.microsecondsSinceEpoch,
+        endTime: _completedAt(ref)?.microsecondsSinceEpoch,
         statusCode: responseData?.statusCode,
         reasonPhrase: responseData?.reasonPhrase,
         headersPath: written.headersPath,
-        requestBodyPath: written.requestBodyPath,
-        responseBodyPath: written.responseBodyPath,
-        requestBodySize: requestBodySize,
-        responseBodySize: responseBodySize,
+        requestBodyPath: prior?.requestBodyPath ?? written.requestBodyPath,
+        responseBodyPath: prior?.responseBodyPath ?? written.responseBodyPath,
+        requestBodySize: prior?.requestBodySize ?? written.requestBodySize,
+        responseBodySize: prior?.responseBodySize ?? written.responseBodySize,
         bodyUnavailable: bodyUnavailable,
         error: responseData?.error ?? requestData?.error,
       ),
     );
+    return !bodyUnavailable;
+  }
+
+  /// `HttpProfileRequest.endTime` only marks the request being sent; the
+  /// exchange is over once the response finished, or the request failed.
+  DateTime? _completedAt(HttpProfileRequest ref) {
+    final responseEnd = ref.response?.endTime;
+    if (responseEnd != null) {
+      return responseEnd;
+    }
+    final failed = ref.request?.error != null || ref.response?.error != null;
+    return failed ? ref.endTime : null;
   }
 
   Map<String, String> _stringHeaders(Map<String, dynamic>? headers) {

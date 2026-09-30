@@ -6,7 +6,7 @@ Servidor MCP que faz attach em VMs Dart já em execução e expõe o tráfego HT
 
 iOS, Android e desktop usam o mesmo fluxo de attach. A URI da VM (`vmUri`) é a chave da sessão.
 
-Com o servidor instalado via Docker, a descoberta lê o Dart Tooling Daemon no host (em macOS: `~/Library/Application Support/Dart/dtd/<pid>`) e anexa sessões sozinha — em geral **não** é preciso `attach_vm`. Esse tool continua como fallback se a descoberta não pegar a VM.
+A descoberta acha os Dart Tooling Daemons (DTD) do IDE e do `flutter run` pelos servidores DevTools (`/api/getDtdUri`, portas 9100+), pelos arquivos em `Dart/dtd` e por `DTD_URI`, e anexa sessões sozinha — em geral **não** é preciso `attach_vm`. Esse tool continua como fallback se a descoberta não pegar a VM.
 
 Se a VM não expõe o profiler HTTP de `dart:io`, a sessão permanece `live`, mas as tools de tráfego respondem com o erro `http_profile_unavailable` (por exemplo em alguns alvos como Flutter web).
 
@@ -27,11 +27,11 @@ bash install.sh --claude --cursor
 bash install.sh --fresh --claude --cursor
 ```
 
-Pelo menos uma flag (`--claude` ou `--cursor`) é obrigatória. O script registra o profile Docker MCP `dart-network-mcp` e mescla a entrada do servidor no JSON do cliente escolhido. **Não remove** outros servidores MCP já configurados (incluindo entradas como `MCP_DOCKER`).
+Pelo menos uma flag (`--claude` ou `--cursor`) é obrigatória. O script compila o servidor nativo (`dart compile exe`) para `~/.local/bin/dart_network_mcp` e mescla a entrada no JSON do cliente escolhido. **Não remove** outros servidores MCP já configurados.
 
-`--fresh` limpa antes de instalar: tira `dart-network-mcp` e `dart-vm-mcp` do Claude e do Cursor, apaga o diretório de dados e os catálogos deste servidor, remove o profile Docker e as imagens e containers `dart-network-mcp:local` e `dart-vm-mcp:local` (inclusive os que estão rodando). Em seguida instala de novo só nos clientes pedidos.
+`--fresh` limpa antes de instalar: tira `dart-network-mcp` e `dart-vm-mcp` do Claude e do Cursor e apaga o diretório de dados. Se o Docker estiver disponível, também remove resquícios de instalações antigas (catálogos, profile, imagens e containers `dart-network-mcp:local` / `dart-vm-mcp:local`). Em seguida instala de novo só nos clientes pedidos.
 
-Requisitos típicos: Docker, `docker mcp`, Dart SDK (para o merge de config) e imagem local `dart-network-mcp:local` (build feito pelo script, salvo `DART_NETWORK_MCP_INSTALL_SKIP_DOCKER`).
+Requisitos: Dart SDK e `python3`. O SQLite vem do sistema (macOS já traz; em Linux instale `libsqlite3`). Não precisa de Docker. Variáveis: `DART_NETWORK_MCP_BIN_DIR` (destino do binário) e `DART_NETWORK_MCP_INSTALL_SKIP_BUILD=1` (só registra o cliente).
 
 ## Tools MCP
 
@@ -74,4 +74,4 @@ A cada **5 segundos**, um lote de três calls em paralelo. Os lotes alternam `PO
 
 `main` liga `HttpClient.enableTimelineLogging` antes do `runApp`. O profiler do `dart:io` só grava um request se o flag já estiver ativo quando ele começa. O servidor também chama `httpEnableTimelineLogging`, mas esse RPC chega depois do primeiro GET de um hot restart.
 
-Com o MCP instalado (Docker), a descoberta anexa a VM sozinha via DTD (`list_sessions` sem `attach_vm`). Detalhes e fallback: [docs/mcp.md](docs/mcp.md). Depois use `list_requests` / `get_request` ou exporte com `export_har` / `export_devtools_json`.
+Com o MCP instalado, a descoberta anexa a VM sozinha via DTD (`list_sessions` sem `attach_vm`). Detalhes e fallback: [docs/mcp.md](docs/mcp.md). Depois use `list_requests` / `get_request` ou exporte com `export_har` / `export_devtools_json`.

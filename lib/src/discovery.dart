@@ -101,3 +101,56 @@ List<String> discoverDtdUris({
 }
 
 String? _jsonString(Object? value) => value is String ? value : null;
+
+/// DevTools servers (started by IDEs, `flutter run`, agents, ...) listen from
+/// 9100 upward and expose the DTD they were launched with over HTTP. This is
+/// the only launcher-independent source: `dart tooling-daemon --machine`
+/// prints its URI to stdout instead of writing a file under `Dart/dtd`.
+const devToolsPorts = [
+  9100, 9101, 9102, 9103, 9104, 9105, 9106, 9107, 9108, 9109, //
+  9110, 9111, 9112, 9113, 9114, 9115, 9116, 9117, 9118, 9119,
+];
+
+Future<List<String>> probeDevToolsDtdUris({
+  required String host,
+  Iterable<int> ports = devToolsPorts,
+}) async {
+  final client = HttpClient()
+    ..connectionTimeout = const Duration(milliseconds: 500);
+  try {
+    final found = await Future.wait(
+      ports.map((port) => _devToolsDtdUri(client, host, port)),
+    );
+    return found.whereType<String>().toSet().toList();
+  } finally {
+    client.close(force: true);
+  }
+}
+
+Future<String?> _devToolsDtdUri(HttpClient client, String host, int port) async {
+  try {
+    final request = await client.getUrl(
+      Uri(scheme: 'http', host: host, port: port, path: '/api/getDtdUri'),
+    );
+    final response = await request.close().timeout(
+      const Duration(seconds: 1),
+    );
+    if (response.statusCode != 200) {
+      await response.drain<void>();
+      return null;
+    }
+    final body = await utf8.decodeStream(response).timeout(
+      const Duration(seconds: 1),
+    );
+    final json = jsonDecode(body);
+    if (json is! Map) return null;
+    final raw = _jsonString(json['dtdUri']);
+    final uri = raw == null ? null : Uri.tryParse(raw);
+    if (uri == null || (uri.scheme != 'ws' && uri.scheme != 'wss')) {
+      return null;
+    }
+    return uri.toString();
+  } catch (_) {
+    return null;
+  }
+}

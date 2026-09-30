@@ -28,6 +28,7 @@ void main() {
   Future<VmSession> attachFake(
     FakeVmService fake, {
     Duration rpcTimeout = const Duration(seconds: 3),
+    Duration? inFlightTimeout,
   }) {
     final canonical = canonicalizeVmUri(fake.consoleHttpUri);
     return VmSession.attach(
@@ -36,6 +37,7 @@ void main() {
       socketUri: Uri.parse(canonical),
       enableTimer: false,
       rpcTimeout: rpcTimeout,
+      inFlightTimeout: inFlightTimeout,
     );
   }
 
@@ -124,7 +126,17 @@ void main() {
       final fake = await FakeVmService.start();
       final session = await attachFake(fake);
       final key = canonicalizeVmUri(fake.consoleHttpUri);
-      fake.addRequest(sampleRequest(id: 'req-u', startTime: 300, statusCode: 100));
+      fake.addRequest(
+        FakeHttpProfileEntry(
+          id: 'req-u',
+          method: 'GET',
+          uri: 'https://example.com/req-u',
+          startTime: 300,
+          endTime: 350,
+          statusCode: 100,
+          responseComplete: false,
+        ),
+      );
       await session.pollOnce();
       fake.updateRequestStatus(id: 'req-u', startTime: 300, statusCode: 200);
       await session.pollOnce();
@@ -334,7 +346,8 @@ void main() {
       await fake.close();
     });
 
-    test('hung getHttpProfile times out and marks socket closed', () async {
+    test('slow getHttpProfile times out without dropping a live session',
+        () async {
       final fake = await FakeVmService.start();
       final session = await attachFake(
         fake,
@@ -346,12 +359,25 @@ void main() {
       expect(store.listRequests(vmUri: key).length, 1);
 
       fake.hangNextGetHttpProfile = true;
+      fake.addRequest(
+        FakeHttpProfileEntry(
+          id: 'after-hang',
+          method: 'GET',
+          uri: 'https://example.com/after-hang',
+          startTime: 1500,
+          endTime: 1550,
+          statusCode: 200,
+          lastModified: DateTime.now().microsecondsSinceEpoch,
+        ),
+      );
       await session.pollOnce();
-      await Future<void>.delayed(const Duration(milliseconds: 50));
+      expect(store.getSession(key)?.state, 'live');
 
-      final record = store.getSession(key);
-      expect(record?.state, 'history');
-      expect(record?.disconnectReason, 'socket closed');
+      await session.pollOnce();
+      expect(store.listRequests(vmUri: key).length, 2);
+      expect(store.getSession(key)?.state, 'live');
+
+      await session.dispose();
       await fake.close();
     });
 
@@ -475,6 +501,153 @@ void main() {
       final rows = failStore.listRequests(vmUri: canonical);
       expect(rows.length, 1);
       expect(rows.single.requestId, 'persist-fail');
+    });
+
+    test(
+        'request whose response is still pending is kept and completed later, not cleared',
+        () async {
+      final fake = await FakeVmService.start();
+      final session = await attachFake(fake);
+      final key = canonicalizeVmUri(fake.consoleHttpUri);
+
+      fake.addRequest(
+        FakeHttpProfileEntry(
+          id: 'slow-post',
+          method: 'POST',
+          uri: 'https://example.com/slow-post',
+          startTime: 6000,
+          endTime: 6001,
+          responseComplete: false,
+          requestBody: const [9],
+        ),
+      );
+      await session.pollOnce();
+      expect(fake.clearHttpProfileCalls, 0,
+          reason: 'response pending: profile must not be cleared');
+
+      fake.completeResponse(
+        id: 'slow-post',
+        startTime: 6000,
+        statusCode: 201,
+        responseBody: const [7, 7],
+      );
+      await session.pollOnce();
+
+      final row = store.findByRequestId(vmUri: key, requestId: 'slow-post').single;
+      expect(row.statusCode, 201);
+      expect(row.responseBodySize, 2);
+      expect(row.endTime, isNotNull);
+      expect(fake.clearHttpProfileCalls, 1);
+
+      await session.dispose();
+      await fake.close();
+    });
+
+    test('failed body fetch keeps the stored body and is retried', () async {
+      final fake = await FakeVmService.start();
+      final session = await attachFake(fake);
+      final key = canonicalizeVmUri(fake.consoleHttpUri);
+
+      fake.addRequest(
+        FakeHttpProfileEntry(
+          id: 'keep-body',
+          method: 'GET',
+          uri: 'https://example.com/keep-body',
+          startTime: 7000,
+          endTime: 7050,
+          statusCode: 200,
+          responseBody: const [1, 2, 3],
+          responseComplete: false,
+        ),
+      );
+      await session.pollOnce();
+
+      fake.failNextGetHttpProfileRequest = true;
+      fake.updateRequestStatus(id: 'keep-body', startTime: 7000, statusCode: 206);
+      await session.pollOnce();
+      var row = store.findByRequestId(vmUri: key, requestId: 'keep-body').single;
+      expect(row.statusCode, 206);
+      expect(row.responseBodyPath, isNotNull);
+      expect(row.responseBodySize, 3);
+      expect(row.bodyUnavailable, isTrue);
+
+      await session.pollOnce();
+      row = store.findByRequestId(vmUri: key, requestId: 'keep-body').single;
+      expect(row.bodyUnavailable, isFalse);
+
+      await session.dispose();
+      await fake.close();
+    });
+
+    test('an isolate that fails does not drop the session or its siblings',
+        () async {
+      final fake = await FakeVmService.start();
+      final session = await attachFake(fake);
+      final key = canonicalizeVmUri(fake.consoleHttpUri);
+
+      fake.addVmIsolate(id: 'isolates/gone', number: '3');
+      fake.brokenIsolates.add('isolates/gone');
+      fake.addRequest(sampleRequest(id: 'healthy', startTime: 8000));
+      await session.pollOnce();
+
+      expect(store.getSession(key)?.state, 'live');
+      expect(store.listRequests(vmUri: key).single.requestId, 'healthy');
+
+      await session.dispose();
+      await fake.close();
+    });
+
+    test('overlapping polls do not run concurrently', () async {
+      final fake = await FakeVmService.start();
+      final session = await attachFake(fake);
+      final before = fake.getHttpProfileCalls;
+
+      await Future.wait([session.pollOnce(), session.pollOnce()]);
+
+      expect(fake.getHttpProfileCalls - before, 1);
+
+      await session.dispose();
+      await fake.close();
+    });
+
+    test('http profiling that becomes available after attach is picked up',
+        () async {
+      final fake = await FakeVmService.start(httpAvailable: false);
+      final session = await attachFake(fake);
+      final key = canonicalizeVmUri(fake.consoleHttpUri);
+      expect(store.getSession(key)?.httpProfileAvailable, isFalse);
+
+      fake.httpAvailable = true;
+      fake.addRequest(sampleRequest(id: 'late', startTime: 9000));
+      await session.pollOnce();
+
+      expect(store.getSession(key)?.httpProfileAvailable, isTrue);
+      expect(session.loggingEnabled, isTrue);
+      expect(store.listRequests(vmUri: key).single.requestId, 'late');
+
+      await session.dispose();
+      await fake.close();
+    });
+
+    test('a request that never finishes stops blocking the profile clear',
+        () async {
+      final fake = await FakeVmService.start();
+      final session = await attachFake(fake, inFlightTimeout: Duration.zero);
+
+      fake.addRequest(
+        FakeHttpProfileEntry(
+          id: 'stuck',
+          method: 'GET',
+          uri: 'https://example.com/stuck',
+          startTime: 10000,
+        ),
+      );
+      await session.pollOnce();
+
+      expect(fake.clearHttpProfileCalls, 1);
+
+      await session.dispose();
+      await fake.close();
     });
   });
 }

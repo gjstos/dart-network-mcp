@@ -4,7 +4,7 @@ import 'dart:io';
 import 'package:test/test.dart';
 
 void main() {
-  test('--fresh clears every agent and docker leftovers, then installs', () async {
+  test('--fresh clears every agent and docker leftovers, then registers the native binary', () async {
     final temp = Directory.systemTemp.createTempSync('install-fresh');
     addTearDown(() => temp.deleteSync(recursive: true));
 
@@ -71,6 +71,8 @@ exit 0
     env['FAKE_DOCKER_LOG'] = log.path;
     env.remove('DART_NETWORK_MCP_DATA');
     env.remove('DART_NETWORK_MCP_DTD_DIR');
+    env['DART_NETWORK_MCP_INSTALL_SKIP_BUILD'] = '1';
+    env['DART_NETWORK_MCP_BIN_DIR'] = '${temp.path}/bin-out';
     env.remove('DART_NETWORK_MCP_INSTALL_SKIP_DOCKER');
     env.remove('LOCALAPPDATA');
 
@@ -93,7 +95,7 @@ exit 0
     expect(cursorServers.containsKey('dart-vm-mcp'), isFalse);
     expect(
       (cursorServers['dart-network-mcp'] as Map)['command'],
-      contains('run_mcp_container.sh'),
+      '${temp.path}/bin-out/dart_network_mcp',
     );
 
     expect(networkData.existsSync(), isTrue);
@@ -101,10 +103,7 @@ exit 0
     expect(legacyData.existsSync(), isFalse);
     expect(File('${catalogs.path}/dart-vm-mcp.yaml').existsSync(), isFalse);
     expect(File('${catalogs.path}/other.yaml').existsSync(), isTrue);
-    expect(
-      File('${catalogs.path}/dart-network-mcp.yaml').readAsStringSync(),
-      contains('name: dart-network-mcp'),
-    );
+    expect(File('${catalogs.path}/dart-network-mcp.yaml').existsSync(), isFalse);
 
     final lines = log.readAsLinesSync();
     expect(lines, contains('ps -aq'));
