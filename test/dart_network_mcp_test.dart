@@ -38,7 +38,8 @@ void main() {
   setUp(() async {
     tempDir = Directory.systemTemp.createTempSync('dart-network-mcp-tool');
     dataDir = tempDir.path;
-    store = SessionStore.open('$dataDir/network.sqlite', dataDirectory: dataDir);
+    store =
+        SessionStore.open('$dataDir/network.sqlite', dataDirectory: dataDir);
     mcp = DartNetworkMcp(store: store, dataDirectory: dataDir);
   });
 
@@ -184,7 +185,8 @@ void main() {
         while (offset != null) {
           final page = mcp.listRequests(vmUri, limit: 2, offset: offset);
           seen.addAll(
-            (page['requests'] as List).map((r) => (r as Map)['requestId'] as String),
+            (page['requests'] as List)
+                .map((r) => (r as Map)['requestId'] as String),
           );
           offset = page['nextOffset'] as int?;
         }
@@ -294,6 +296,73 @@ void main() {
       expect(detail['responseBodyPath'], isNotEmpty);
       expect(detail['responseBodySize'], 120000);
       expect(detail.containsKey('requestHeaders'), isTrue);
+    });
+
+    test('getCurl returns curls and per-item errors in one call', () {
+      const vmUri = 'ws://127.0.0.1:8181/ws';
+      store.upsertSession(liveSession(vmUri));
+      final big = Uint8List.fromList(List.filled(120000, 0x61));
+      for (final entry in {'1': utf8.encode('{"a":1}'), '2': big}.entries) {
+        final written = store.files.write(
+          vmUri: vmUri,
+          requestId: entry.key,
+          startTime: 10,
+          requestHeaders: {'content-type': 'application/json'},
+          responseHeaders: {},
+          requestBody: Uint8List.fromList(entry.value),
+          responseBody: null,
+        );
+        store.upsertRequest(
+          RequestRecord(
+            vmUri: vmUri,
+            requestId: entry.key,
+            isolateId: 'isolates/1',
+            method: 'POST',
+            uri: 'https://example.com/${entry.key}',
+            startTime: 10,
+            endTime: 20,
+            statusCode: 200,
+            reasonPhrase: 'OK',
+            headersPath: written.headersPath,
+            requestBodyPath: written.requestBodyPath,
+            responseBodyPath: written.responseBodyPath,
+            requestBodySize: written.requestBodySize,
+            responseBodySize: written.responseBodySize,
+            bodyUnavailable: false,
+            error: null,
+          ),
+        );
+      }
+
+      final result = mcp.getCurl(vmUri, [
+        (requestId: '1', startTime: null),
+        (requestId: '2', startTime: null),
+        (requestId: 'missing', startTime: null),
+      ]);
+      final curls = result['curls'] as List;
+      expect(curls, hasLength(2));
+      expect(
+        (curls[0] as Map)['curl'],
+        allOf(
+          contains("curl 'https://example.com/1'"),
+          contains("-H 'content-type: application/json'"),
+          contains("--data-raw '{\"a\":1}'"),
+        ),
+      );
+      expect((curls[1] as Map)['curl'], contains("--data-binary '@"));
+      final errors = result['errors'] as List;
+      expect(errors, hasLength(1));
+      expect((errors.single as Map)['requestId'], 'missing');
+      expect((errors.single as Map)['code'], 'request_not_found');
+    });
+
+    test('getCurl rejects empty and oversized lists', () {
+      const vmUri = 'ws://127.0.0.1:8181/ws';
+      store.upsertSession(liveSession(vmUri));
+      expect(
+        (mcp.getCurl(vmUri, [])['error'] as Map)['code'],
+        'invalid_params',
+      );
     });
 
     test('getRequest ambiguous request does not read files', () {
@@ -450,9 +519,8 @@ void main() {
       expect(byId['broken-json']!['responseBodySize'], '{"a":'.length);
       expect(byId['binary']!['responseBodySize'], 2);
 
-      final detail =
-          mcp.getRequest(key, 'json-object', startTime: start)['request']
-              as Map;
+      final detail = mcp.getRequest(key, 'json-object',
+          startTime: start)['request'] as Map;
       expect(detail['isolateId'], 'isolates/main');
       expect(detail['reasonPhrase'], 'Created');
       expect(detail['endTime'], start + 1500000);
@@ -478,8 +546,7 @@ void main() {
       final postData = (objectEntry['request'] as Map)['postData'] as Map;
       expect(postData['text'], '{"title":"a"}');
       expect(postData.containsKey('encoding'), isFalse);
-      final content =
-          ((objectEntry['response'] as Map)['content'] as Map);
+      final content = ((objectEntry['response'] as Map)['content'] as Map);
       expect(content['text'], '{"id":1,"title":"a"}');
       expect(content['size'], '{"id":1,"title":"a"}'.length);
       expect(content.containsKey('encoding'), isFalse);
@@ -493,8 +560,7 @@ void main() {
         sampleRequest(id: 'cut', startTime: 80, responseBody: bigBody),
       );
       final key = await attachFake(fake);
-      final item =
-          (mcp.listRequests(key)['requests'] as List).single as Map;
+      final item = (mcp.listRequests(key)['requests'] as List).single as Map;
       expect(item.containsKey('responseBody'), isFalse);
       expect(item.containsKey('responseBodyEncoding'), isFalse);
       expect(item.containsKey('isolateId'), isFalse);

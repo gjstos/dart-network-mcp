@@ -12,6 +12,7 @@ Lê o tráfego HTTP (`dart:io` HTTP profile) de apps Dart/Flutter em debug. Toda
 1. `list_sessions`. A descoberta anexa VMs sozinha (a cada 2s); só use `attach_vm(uri)` se a sessão não aparecer. Use a URI `http://…` ou `ws://…/ws` impressa pelo `flutter run`.
 2. `list_requests(vmUri, …)` para o resumo: método, URI, status, `durationMs`, sizes. Não traz headers nem body. Filtre com `method`, `status`, `urlContains` antes de paginar.
 3. `get_request(vmUri, requestId)` para headers e body da request escolhida.
+3b. `get_curl(vmUri, requests:[{requestId}, ...])` quando o usuário quer reproduzir chamadas; passe todas numa chamada só. Completo por padrão; use `dropNoiseHeaders`, `includeBody=false` ou `multiline=false` para enxugar.
 4. `export_har` ou `export_devtools_json` se o usuário quer o arquivo. O retorno é `path`; diga onde está, não leia o arquivo inteiro.
 
 ## Regras que evitam erro

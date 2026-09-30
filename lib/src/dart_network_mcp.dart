@@ -5,6 +5,7 @@ import 'dart:typed_data';
 import 'package:crypto/crypto.dart';
 import 'package:sqlite3/sqlite3.dart';
 
+import 'curl_export.dart';
 import 'devtools_export.dart';
 import 'har_export.dart';
 import 'session_store.dart';
@@ -13,6 +14,7 @@ import 'vm_session.dart';
 import 'vm_uri.dart';
 
 const int toolResponseCharBudget = 100000;
+const int maxCurlBatch = 50;
 
 class DartNetworkMcp {
   DartNetworkMcp({
@@ -203,44 +205,118 @@ class DartNetworkMcp {
         return guard;
       }
       final record = store.getSession(vmUri)!;
-      final rows = store.findByRequestId(vmUri: vmUri, requestId: requestId);
-      if (rows.isEmpty) {
-        return toolError(
-          'request_not_found',
-          'Request not found',
-          vmUri: vmUri,
-        );
+      final found = _findRow(vmUri, requestId, startTime);
+      if (found.error != null) {
+        return found.error!;
       }
-      if (startTime == null && rows.length > 1) {
-        return {
-          'error': <String, Object?>{
-            'code': 'ambiguous_request',
-            'message': 'Multiple requests share this id',
-            'vmUri': vmUri,
-            'startTimes': rows.map((r) => r.startTime).toList(),
-          },
-        };
-      }
-      final RequestRecord row;
-      if (startTime != null) {
-        final match = rows.where((r) => r.startTime == startTime).toList();
-        if (match.isEmpty) {
-          return toolError(
-            'request_not_found',
-            'Request not found',
-            vmUri: vmUri,
-          );
-        }
-        row = match.single;
-      } else {
-        row = rows.single;
-      }
+      final row = found.row!;
       return _fitGetRequestEnvelope(
         vmUri: vmUri,
         state: record.state,
         request: _requestDetail(row),
         row: row,
       );
+    });
+  }
+
+  ({Map<String, Object?>? error, RequestRecord? row}) _findRow(
+    String vmUri,
+    String requestId,
+    int? startTime,
+  ) {
+    final rows = store.findByRequestId(vmUri: vmUri, requestId: requestId);
+    if (rows.isEmpty) {
+      return (
+        error:
+            toolError('request_not_found', 'Request not found', vmUri: vmUri),
+        row: null,
+      );
+    }
+    if (startTime == null && rows.length > 1) {
+      return (
+        error: <String, Object?>{
+          'error': <String, Object?>{
+            'code': 'ambiguous_request',
+            'message': 'Multiple requests share this id',
+            'vmUri': vmUri,
+            'startTimes': rows.map((r) => r.startTime).toList(),
+          },
+        },
+        row: null,
+      );
+    }
+    if (startTime == null) {
+      return (error: null, row: rows.single);
+    }
+    final match = rows.where((r) => r.startTime == startTime).toList();
+    if (match.isEmpty) {
+      return (
+        error:
+            toolError('request_not_found', 'Request not found', vmUri: vmUri),
+        row: null,
+      );
+    }
+    return (error: null, row: match.single);
+  }
+
+  Map<String, Object?> getCurl(
+    String vmUri,
+    List<({String requestId, int? startTime})> requests, {
+    bool includeHistory = false,
+    bool includeBody = true,
+    bool includeHeaders = true,
+    bool dropNoiseHeaders = false,
+    bool multiline = true,
+  }) {
+    final key = _canonicalKeyOrError(vmUri);
+    if (key.error != null) {
+      return key.error!;
+    }
+    vmUri = key.canonical!;
+    if (requests.isEmpty || requests.length > maxCurlBatch) {
+      return toolError(
+        'invalid_params',
+        'requests must hold 1 to $maxCurlBatch items',
+      );
+    }
+    return _runStore(() {
+      final guard = _trafficGuard(vmUri, includeHistory);
+      if (guard != null) {
+        return guard;
+      }
+      final curls = <Map<String, Object?>>[];
+      final errors = <Map<String, Object?>>[];
+      var remaining = toolResponseCharBudget;
+      for (final item in requests) {
+        final found = _findRow(vmUri, item.requestId, item.startTime);
+        if (found.error != null) {
+          errors.add({
+            'requestId': item.requestId,
+            ...(found.error!['error'] as Map<String, Object?>),
+          });
+          continue;
+        }
+        final row = found.row!;
+        final bodyTooLarge = includeBody &&
+            row.requestBodyPath != null &&
+            row.requestBodySize > remaining;
+        final curl = buildCurl(
+          _exportableFromRow(row,
+              readResponseBody: false, readRequestBody: !bodyTooLarge),
+          bodyFile: bodyTooLarge ? row.requestBodyPath : null,
+          includeBody: includeBody,
+          includeHeaders: includeHeaders,
+          dropNoiseHeaders: dropNoiseHeaders,
+          multiline: multiline,
+        );
+        remaining -= curl.length;
+        curls.add({
+          'requestId': item.requestId,
+          'startTime': row.startTime,
+          'curl': curl,
+        });
+      }
+      return {'vmUri': vmUri, 'curls': curls, 'errors': errors};
     });
   }
 
@@ -448,7 +524,11 @@ class DartNetworkMcp {
     return count;
   }
 
-  ExportableRequest _exportableFromRow(RequestRecord row) {
+  ExportableRequest _exportableFromRow(
+    RequestRecord row, {
+    bool readRequestBody = true,
+    bool readResponseBody = true,
+  }) {
     final headers = store.files.readHeaders(row.headersPath);
     return ExportableRequest(
       vmUri: row.vmUri,
@@ -462,8 +542,8 @@ class DartNetworkMcp {
       reasonPhrase: row.reasonPhrase,
       requestHeaders: headers.requestHeaders,
       responseHeaders: headers.responseHeaders,
-      requestBody: _readBody(row.requestBodyPath),
-      responseBody: _readBody(row.responseBodyPath),
+      requestBody: readRequestBody ? _readBody(row.requestBodyPath) : null,
+      responseBody: readResponseBody ? _readBody(row.responseBodyPath) : null,
       requestBodySize: row.requestBodySize,
       responseBodySize: row.responseBodySize,
       bodyUnavailable: row.bodyUnavailable,

@@ -181,7 +181,8 @@ class _DtdDiscovery {
   }
 
   Directory _dartToolDirectory() {
-    final home = Platform.environment['HOME'] ?? Platform.environment['USERPROFILE'];
+    final home =
+        Platform.environment['HOME'] ?? Platform.environment['USERPROFILE'];
     if (home == null || home.isEmpty) {
       return _emptyDartToolDir;
     }
@@ -263,9 +264,9 @@ class _DtdDiscovery {
             .streamListen(ConnectedAppServiceConstants.serviceName)
             .timeout(const Duration(seconds: 5));
         events = client.onVmServiceUpdate().listen(
-          (event) => unawaited(_onVmServiceEvent(event)),
-          onError: (Object e) => _log('DTD VM event stream error: $e'),
-        );
+              (event) => unawaited(_onVmServiceEvent(event)),
+              onError: (Object e) => _log('DTD VM event stream error: $e'),
+            );
       } catch (e) {
         _log('DTD event stream unavailable for $wsUri: $e');
       }
@@ -380,7 +381,9 @@ void _registerTools(McpServer server, DartNetworkMcp mcp) {
     'get_session',
     description: 'Get one VM session',
     toolInputSchema: ToolInputSchema(
-      properties: {'vmUri': {'type': 'string'}},
+      properties: {
+        'vmUri': {'type': 'string'}
+      },
       required: ['vmUri'],
     ),
     callback: ({args, extra}) async {
@@ -396,7 +399,9 @@ void _registerTools(McpServer server, DartNetworkMcp mcp) {
     'attach_vm',
     description: 'Attach to a VM by URI',
     toolInputSchema: ToolInputSchema(
-      properties: {'uri': {'type': 'string'}},
+      properties: {
+        'uri': {'type': 'string'}
+      },
       required: ['uri'],
     ),
     callback: ({args, extra}) async {
@@ -472,8 +477,68 @@ void _registerTools(McpServer server, DartNetworkMcp mcp) {
         mcp.getRequest(
           vmUri,
           requestId,
-          startTime: args?['startTime'] is int ? args!['startTime'] as int : null,
+          startTime:
+              args?['startTime'] is int ? args!['startTime'] as int : null,
           includeHistory: args?['includeHistory'] == true,
+        ),
+      );
+    },
+  );
+
+  server.tool(
+    'get_curl',
+    description:
+        'Get curl commands for a list of requests, in Chrome "Copy as cURL (bash)" style: full headers and body by default. Pass many requests in one call (max 50). Flags simplify the output: includeBody=false, includeHeaders=false, dropNoiseHeaders=true (drops content-length, host, user-agent, accept-*, sec-*), multiline=false. A request body too large to inline becomes --data-binary @file.',
+    toolInputSchema: ToolInputSchema(
+      properties: {
+        'vmUri': {'type': 'string'},
+        'requests': {
+          'type': 'array',
+          'items': {
+            'type': 'object',
+            'properties': {
+              'requestId': {'type': 'string'},
+              'startTime': {'type': 'integer'},
+            },
+            'required': ['requestId'],
+          },
+        },
+        'includeHistory': {'type': 'boolean'},
+        'includeBody': {'type': 'boolean'},
+        'includeHeaders': {'type': 'boolean'},
+        'dropNoiseHeaders': {'type': 'boolean'},
+        'multiline': {'type': 'boolean'},
+      },
+      required: ['vmUri', 'requests'],
+    ),
+    callback: ({args, extra}) async {
+      final vmUri = args?['vmUri'];
+      final raw = args?['requests'];
+      if (vmUri is! String || vmUri.isEmpty) {
+        return _toolResult(toolError('invalid_params', 'vmUri is required'));
+      }
+      final requests = <({String requestId, int? startTime})>[];
+      if (raw is List) {
+        for (final item in raw) {
+          final id = item is Map ? item['requestId'] : null;
+          if (id is! String || id.isEmpty) {
+            return _toolResult(
+              toolError('invalid_params', 'each request needs a requestId'),
+            );
+          }
+          final start = (item as Map)['startTime'];
+          requests.add((requestId: id, startTime: start is int ? start : null));
+        }
+      }
+      return _toolResult(
+        mcp.getCurl(
+          vmUri,
+          requests,
+          includeHistory: args?['includeHistory'] == true,
+          includeBody: args?['includeBody'] != false,
+          includeHeaders: args?['includeHeaders'] != false,
+          dropNoiseHeaders: args?['dropNoiseHeaders'] == true,
+          multiline: args?['multiline'] != false,
         ),
       );
     },
@@ -528,7 +593,9 @@ void _registerTools(McpServer server, DartNetworkMcp mcp) {
     'delete_session',
     description: 'Delete a session and its stored requests',
     toolInputSchema: ToolInputSchema(
-      properties: {'vmUri': {'type': 'string'}},
+      properties: {
+        'vmUri': {'type': 'string'}
+      },
       required: ['vmUri'],
     ),
     callback: ({args, extra}) async {
@@ -549,15 +616,19 @@ void _registerTools(McpServer server, DartNetworkMcp mcp) {
 
   server.tool(
     'set_retention',
-    description: 'Set the session retention period in days and sweep expired history',
+    description:
+        'Set the session retention period in days and sweep expired history',
     toolInputSchema: ToolInputSchema(
-      properties: {'days': {'type': 'integer'}},
+      properties: {
+        'days': {'type': 'integer'}
+      },
       required: ['days'],
     ),
     callback: ({args, extra}) async {
       final days = args?['days'];
       if (days is! int) {
-        return _toolResult(toolError('invalid_params', 'days must be an integer'));
+        return _toolResult(
+            toolError('invalid_params', 'days must be an integer'));
       }
       return _toolResult(mcp.setRetention(days));
     },

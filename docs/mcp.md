@@ -63,6 +63,7 @@ list_requests(vmUri)   → resumo + sizes (sem body, sem headers)
         │
         ▼
 get_request(...)       → headers, isolate, sizes, body se couber no teto
+get_curl(...)          → curl de várias requests numa chamada (estilo Chrome)
         │
         ▼
 export_har / export_devtools_json
@@ -493,6 +494,16 @@ flowchart TB
   t7 -->|não| s3
   t6 --> s1 --> s2
 ```
+
+### `get_curl`
+
+Entrada: `vmUri`, `requests: [{requestId, startTime?}]` (1 a 50), `includeHistory`. Saída: `{vmUri, curls: [{requestId, startTime, curl}], errors: [{requestId, code, ...}]}`. Erro de um item (`request_not_found`, `ambiguous_request`) não derruba o lote.
+
+Padrão igual ao "Copy as cURL (bash)" do Chrome: `curl 'url'` + um `-H` por linha com `\`, todos os headers (inclusive `Authorization`, `Cookie`, `Content-Length`), `-X` só fora de GET / POST com corpo, `--head` para HEAD, `--compressed` se `Accept-Encoding` aceitar gzip/br, corpo em `--data-raw` (binário em `--data-binary $'\x..'`). Só a request; a resposta fica em `get_request`.
+
+Flags para enxugar: `includeBody=false`, `includeHeaders=false`, `dropNoiseHeaders=true` (remove `content-length`, `host`, `connection`, `user-agent`, `accept-encoding`, `accept-language`, `sec-*`), `multiline=false`. Flags valem para o lote todo.
+
+Única exceção ao "completo": quando o corpo da request não cabe no teto de 100000 caracteres da resposta, ele vira `--data-binary '@<caminho do arquivo gravado>'`.
 
 ### `export_har` / `export_devtools_json`
 
